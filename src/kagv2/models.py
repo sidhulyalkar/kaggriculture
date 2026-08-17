@@ -31,7 +31,25 @@ def train_supply_model(turn_df,horizon=24,alpha=10.0):
     artifact={"type":"ridge_multi","features":list(X.columns),"targets":targets,"coef":m.coef_.tolist(),"intercept":np.asarray(m.intercept_).tolist(),"metrics":metrics}
     return artifact,metrics
 
-def save_model_bundle(path, win=None, supply=None, archetype=None, macro_library=None, policy_by_archetype=None):
-    obj={"version":1,"win":win,"supply":supply,"archetype":archetype,"macro_library":macro_library,"policy_by_archetype":policy_by_archetype or {}}
+def save_model_bundle(path, win=None, supply=None, archetype=None, macro_library=None,
+                      policy_by_archetype=None, meta=None, probe=None, provenance=None):
+    """Write the single tiny artifact consumed by the Kaggle runtime.
+
+    ``meta`` contains the precomputed policy-zoo payoff table/equilibrium mix.
+    ``probe`` is reserved for *promoted* active-market-probe rules; research
+    output should leave it disabled until paired simulator evidence clears the
+    promotion gate.
+    """
+    obj={
+        "version":2,
+        "win":win,
+        "supply":supply,
+        "archetype":archetype,
+        "macro_library":macro_library,
+        "policy_by_archetype":policy_by_archetype or {},
+        "meta":meta,
+        "probe":probe or {"enabled":False},
+        "provenance":provenance or {},
+    }
     Path(path).write_text(json.dumps(obj,indent=2,sort_keys=True))
     return obj

@@ -1,150 +1,268 @@
-# Kaggriculture: Replay Intelligence + Best-Response Agent System
+# Kaggriculture: Replay Intelligence + Robust Meta-Agent
 
-> A CPU-first research and submission stack for Kaggle's **Kaggriculture** simulation competition.
+> CPU-first research, simulation, opponent-modeling, and submission stack for Kaggle's **Kaggriculture** simulation competition.
 >
-> Goal: maximize **head-to-head win probability** on the ladder, not merely farm cash against passive bots.
+> Primary objective: maximize **head-to-head ladder win probability**, not merely farm cash against passive bots.
 
-This repository is the working competition lab for building a high-floor Kaggriculture agent and then upgrading it with public replay intelligence, opponent modeling, future-market prediction, and population-based best-response search.
+This repository is the canonical research lab for building a high-floor Kaggriculture agent and then upgrading it with public replay intelligence, opponent modeling, future-market prediction, robust policy search, and meta-equilibrium selection.
 
-The central design principle is simple:
+The core design rule is:
 
-**Do not ask machine learning to relearn deterministic mechanics.**
+> **Do not ask machine learning to relearn deterministic mechanics.**
 
-Kaggriculture's farming mechanics, routing constraints, market execution order, crop lifecycles, shed limits, labor reset, and terminal scoring are known. Those belong in an exact deterministic controller. Learning is reserved for the uncertain strategic layer: what opponents are likely to do next, what the shared market will look like, and which macro policy has the best chance of winning the matchup.
+Routing, watering, feeding, harvesting, shed handling, labor reset, land purchase order, market-order constraints, and endgame liquidation belong in a deterministic controller. Learning is reserved for the uncertain strategic layer: what the opponent is probably doing, what the shared market is likely to do next, and which precomputed macro strategy has the best chance of winning this matchup.
 
 ---
 
 ## Competition objective
 
-A ladder episode runs for 720 turns. The winner is the player with the most bank cash at the end. The public ladder rating is driven by **win / loss / tie**, not by the size of the cash margin.
-
-That distinction shapes the whole project:
-
-- Cash is a useful diagnostic.
-- Passive-opponent score is a useful smoke test.
-- **Pairwise win rate against a realistic opponent population is the promotion metric.**
-- A strategy that scores less cash in isolation can still be better if it is a stronger shared-market best response.
-
----
-
-## System architecture
+A game lasts 720 turns. Final bank cash determines the winner. The ladder rating is driven by win / loss / tie outcomes, so the central offline metric is:
 
 ```text
-                 PUBLIC LEADERBOARD EPISODES
-                           │
-                           ▼
-                 ┌──────────────────┐
-                 │ Replay Factory   │
-                 │ current era only │
-                 └────────┬─────────┘
-                          │
-             ┌────────────┼──────────────┐
-             ▼            ▼              ▼
-      Ladder Forensics  Macro Miner   Future Labels
-       win / strength   archetypes    opp sells t+24
-             │            │              │
-             └────────────┼──────────────┘
-                          ▼
-                 ┌──────────────────┐
-                 │ Opponent Belief  │
-                 │ archetype probs  │
-                 └────────┬─────────┘
-                          │
-          ┌───────────────┴────────────────┐
-          ▼                                ▼
-   Future Market Model              Policy Zoo
-   expected sell floods     default / counter / shop / etc.
-          │                                │
-          └──────────────┬─────────────────┘
-                         ▼
-                 CEM Best Response
-                  win probability
-                         │
-                         ▼
-               Selective Macro Planner
-               confidence + hysteresis
-                         │
-                         ▼
-                Exact Farm Controller
-            routing / water / feed / shed
-                         │
-                         ▼
-                 Kaggle submission
+pairwise win rate
++ both seats
++ held-out seeds
++ realistic opponent population
 ```
 
-### Layer A: Exact execution controller
+Mean cash is useful for debugging, but it is not the promotion target.
 
-The controller is responsible for mechanics that must never be guessed:
+---
 
-- routing farmers and temporary hands;
-- plant, water, harvest, feed, care, fertilize, pickup/drop/place;
-- keeping new plants alive on planting day;
-- daily re-hiring of temporary labor;
-- seed and animal acquisition timing;
+# Architecture
+
+```text
+              PUBLIC LADDER EPISODES
+                       |
+                       v
+              Replay Data Factory
+                       |
+       +---------------+----------------+
+       |               |                |
+       v               v                v
+ Ladder Strength   Macro Mining    Future Labels
+ Bradley-Terry     + Open-loop     opp sells t+24
+       |               |                |
+       +---------------+----------------+
+                       v
+               Opponent Belief
+             archetype posterior
+                       |
+         +-------------+-------------+
+         |                           |
+         v                           v
+ Future Market Model           Policy Zoo
+ predicted supply floods       robust CEM
+         |                           |
+         |                    payoff matrix
+         |                           |
+         |                    meta-equilibrium
+         |                           |
+         +-------------+-------------+
+                       v
+             Confidence-Gated
+              Macro Selector
+                       |
+                       v
+        Exact Deterministic Controller
+        route / water / feed / harvest
+                       |
+                       v
+              Kaggle submission
+```
+
+A parallel research branch mines **conditional reactions** around market shocks and evaluates tiny active-market probes, but probes remain disabled unless paired simulator experiments show a robust positive edge.
+
+---
+
+# Why this hierarchy
+
+The public meta contains a strong clue that many competitive agents may be approximately **open-loop at the macro level**. If that is true, the search problem is much smaller than generic end-to-end RL:
+
+```text
+not:
+720 turns x every low-level action
+
+but closer to:
+land timing
+labor schedule
+crop mix
+animal mix
+sell reserves
+terminal timing
+```
+
+The repository tests this hypothesis rather than assuming it.
+
+`src/kagv2/ladder.py` measures action-macro entropy for repeated submissions at the same day/hour. Low entropy among strong actors supports heavier use of macro search. High conditional variation supports more opponent-aware adaptation.
+
+---
+
+# Current layers
+
+## 1. Exact execution controller
+
+`submission/base_controller.py`
+
+Owns mechanics that must never be guessed:
+
+- farmer and temporary-hand routing;
+- planting and same-day watering;
+- harvest timing;
+- animal feed/care/fertilizer collection;
+- pickup/drop/place around the shed;
+- daily labor rehiring;
+- seed and animal acquisition;
+- land expansion;
 - shed-capacity protection;
 - market-order limits;
-- land expansion;
 - terminal liquidation.
 
-### Layer B: Macro policy
+If every learned artifact is deleted, the agent still runs a complete deterministic game.
 
-The macro layer chooses targets rather than raw movements:
+## 2. Parametric macro policy
 
-- hands by phase;
-- land unlock timing;
-- cow / sheep targets;
-- wheat / melon / strawberry allocation;
-- specialist crops when shop demand justifies them;
-- product-specific sell reserves;
+`submission/parametric_agent.py`
+
+The macro controller exposes a compact policy vector covering:
+
+- early/mid/late labor targets;
+- cow and sheep targets;
+- wheat/melon/strawberry allocation;
+- premium-product sell reserves;
+- fertilizer reserve;
 - terminal liquidation start.
 
-This is deliberately low dimensional, making search and A/B attribution much easier than end-to-end RL.
+This is the space CEM searches offline.
 
-### Layer C: Replay intelligence
+## 3. Replay intelligence
 
-Public ladder episodes are transformed into:
+`src/kagv2/replay.py`, `schema.py`, `features.py`, `ladder.py`
 
-- turn-level state/action tables;
-- daily macro tables;
-- opponent-adjusted strength estimates;
-- open-loop / reactive behavior measurements;
-- strategy archetypes;
-- future opponent sell-volume labels;
-- win and value diagnostics.
+Public episodes become:
 
-### Layer D: Selective predictive control
+- turn-level Parquet;
+- daily macro summaries;
+- win/loss/margin labels;
+- opponent next-horizon sell labels;
+- Bradley-Terry strength estimates;
+- open-loop scores.
 
-The first learned intervention is intentionally conservative: **sell earlier when a strong predicted opponent dump is likely and the current premium price is still healthy.**
+The replay layer keeps a strict boundary between legal live features and private offline labels.
 
-Prediction may accelerate liquidation. It may not violate mechanics or invent unsafe actions. If no trained model is present, the submission falls back to the deterministic policy.
+## 4. Strategy and reaction mining
 
-### Layer E: Best-response search
+`src/kagv2/macros.py`
 
-Cross-Entropy Method (CEM) searches a compact policy vector against a policy zoo. The objective is both-seat pairwise win rate with a tiny cash-margin tie-breaker, not passive final score.
+Clusters recurring farm strategies and distills day-indexed macro schedules.
+
+`src/kagv2/reactions.py`
+
+Clusters **conditional responses** around high-variance events such as:
+
+- strawberry/melon price crashes;
+- market floods;
+- market drains;
+- abrupt price spikes.
+
+This avoids clustering 720 turns of noisy low-level movement. Bradley-Terry strength weights emphasize reactions exhibited by successful ladder agents.
+
+## 5. Predictive models
+
+`src/kagv2/models.py`, `submission/runtime_model.py`
+
+Initial learned targets:
+
+- opponent sell volume over the next 24 turns;
+- opponent macro archetype;
+- diagnostic win/value estimates.
+
+The runtime model is distilled to tiny pure-Python arithmetic. No sklearn inference is required in the submission hot path.
+
+## 6. Robust population CEM
+
+`src/kagv2/cem.py`
+
+Two optimizers are available:
+
+- `cem_optimize`: pure scalar best response for controlled experiments;
+- `cem_optimize_population`: robust population search.
+
+The robust objective combines:
+
+```text
+expected population utility
++ worst-archetype utility
++ lower-tail CVaR
+```
+
+This deliberately sacrifices some narrow peak performance to reduce the chance of collapsing when the ladder meta shifts.
+
+## 7. Meta-equilibrium
+
+`src/kagv2/equilibrium.py`
+
+The policy zoo produces a policy x opponent-archetype payoff matrix. A multiplicative-weights/no-regret solver estimates a rectangular zero-sum equilibrium and reports a duality-gap exploitability diagnostic.
+
+The final prior blends:
+
+```text
+current-meta exploitation
++
+maximin robustness
+```
+
+The live agent does **not** run CEM or equilibrium search. Those are entirely offline.
+
+## 8. Tiny live meta selector
+
+`submission/meta_runtime.py`
+
+Once per in-game day, the live agent:
+
+1. updates the opponent archetype posterior;
+2. scores precomputed macro policies against that posterior;
+3. regularizes using the robust equilibrium prior;
+4. switches only if the expected gain clears a hysteresis threshold.
+
+This is a tiny matrix-vector calculation, comfortably suited to the action-time budget.
+
+## 9. Predictive selling
+
+`submission/predictive_agent.py`
+
+The first learned market intervention is deliberately conservative:
+
+> sell premium inventory earlier when the model predicts a near-term opponent supply flood and the current price is still healthy.
+
+This is lower risk than rebuilding the farm based on an uncertain prediction.
+
+## 10. Experimental active market probes
+
+`src/kagv2/probes.py`
+
+The code can detect price bands where opponent next-turn selling changes abruptly, then calculate exact market impact for small candidate sell probes.
+
+Important engine reality:
+
+- any product can be sold;
+- only **WHEAT** and **FERTILIZER** are legal `BUY_PRODUCT` items.
+
+Therefore a strategy such as “dump strawberries, then buy them back cheaply” is impossible. The only plausible use of a probe is **information acquisition / threshold testing**.
+
+Probes are research-only and disabled by default. Promotion requires a paired control/probe tournament with a positive lower confidence bound.
 
 ---
 
-## Why this approach
-
-Community discussion around the competition contains an important hypothesis: many strong agents behave approximately **open-loop** at the macro level. In other words, the winning search space may be closer to an optimized farming program than a giant reactive RL policy.
-
-This repository does not assume that hypothesis is true. It tests it.
-
-`src/kagv2/ladder.py` measures action-macro entropy for repeated submissions at the same day/hour across different episodes. If high-rated agents have low entropy, macro search gets more emphasis. If strong agents are highly opponent-conditioned, the belief and predictive layers get more emphasis.
-
-The same philosophy applies to RL: it remains an option, but it must beat simpler methods on held-out pairwise tournaments before entering the hot path.
-
----
-
-## Repository layout
+# Repository layout
 
 ```text
 .
 ├── README.md
 ├── STATUS.md
 ├── RESEARCH_NOTES.md
-├── pyproject.toml
 ├── requirements.txt
+├── pyproject.toml
 │
 ├── docs/
 │   ├── ARCHITECTURE.md
@@ -159,7 +277,8 @@ The same philosophy applies to RL: it remains an option, but it must beat simple
 │   ├── 03_macro_strategy_miner.ipynb
 │   ├── 04_predictive_models_cpu.ipynb
 │   ├── 05_cem_best_response_search.ipynb
-│   └── 06_build_v2_submission.ipynb
+│   ├── 06_build_v2_submission.ipynb
+│   └── 07_meta_equilibrium_and_probes.ipynb
 │
 ├── src/kagv2/
 │   ├── constants.py
@@ -168,9 +287,12 @@ The same philosophy applies to RL: it remains an option, but it must beat simple
 │   ├── features.py
 │   ├── ladder.py
 │   ├── macros.py
+│   ├── reactions.py
 │   ├── models.py
 │   ├── runtime_features.py
 │   ├── cem.py
+│   ├── equilibrium.py
+│   ├── probes.py
 │   └── simulator.py
 │
 ├── submission/
@@ -179,6 +301,7 @@ The same philosophy applies to RL: it remains an option, but it must beat simple
 │   ├── parametric_agent.py
 │   ├── base_controller.py
 │   ├── runtime_model.py
+│   ├── meta_runtime.py
 │   └── learned_model.json
 │
 ├── baselines/v1/
@@ -188,6 +311,7 @@ The same philosophy applies to RL: it remains an option, but it must beat simple
 │
 ├── scripts/
 │   ├── build_submission.py
+│   ├── build_meta_artifact.py
 │   ├── check_submission.py
 │   ├── engine_audit.py
 │   ├── replay_cli_plan.py
@@ -195,401 +319,286 @@ The same philosophy applies to RL: it remains an option, but it must beat simple
 │
 └── tests/
     ├── test_engine_mirror.py
-    └── test_runtime.py
+    ├── test_runtime.py
+    └── test_meta.py
 ```
 
 ---
 
-## Current status
+# Kaggle CPU notebook pipeline
 
-### V1
+All research notebooks are designed for:
 
-The first submitted policy is a deterministic tournament-oriented heuristic with:
+```text
+Accelerator: None
+```
 
-- three-quadrant economic plan;
-- daily Fibonacci labor;
-- cow / sheep fertilizer engine;
-- wheat / melon / strawberry portfolio;
-- visible-opponent counter-meta switch;
-- price-aware selling;
-- terminal liquidation.
+The intended order is:
 
-The first Kaggle submission entered at the ladder's initial rating of **600**. That is not yet evidence of strength or weakness; hosted episodes and rating movement are the evidence we need.
+```text
+E000 -> E001 -> E002 -> E003 -> E004 -> E005 -> E007 -> E006
+```
 
-### V2 scaffold
+E006 remains the final build notebook even though E007 was added later.
 
-V2 adds:
+## E000 — Episode Index Audit
 
-- replay ingestion;
-- ladder forensics;
-- macro archetypes;
-- future supply forecasting;
-- CEM policy search;
-- tiny runtime model support;
-- confidence-gated predictive selling.
+**Notebook:** `00_episode_index_audit.ipynb`
 
-The checked-in `submission/learned_model.json` is intentionally allowed to be empty. Until replay-trained artifacts are promoted, V2 behaves as a safe deterministic fallback.
+**Inputs**
+- `kaggle/kaggriculture-episodes-index`
+- repository source
+
+**Accelerator:** None  
+**Internet:** Off
+
+**Outputs**
+- `episode_schema_report.csv`
+- `episode_catalog.parquet`
+
+Purpose: discover the official Episodes Index schema rather than guessing column names.
+
+## E001 — Replay Factory
+
+**Inputs**
+- E000 catalog
+- replay JSON files
+
+**Accelerator:** None  
+**Internet:** On only for acquisition, Off for parsing
+
+**Outputs**
+- `turns.parquet`
+- `daily_macros.parquet`
+- replay manifest
+
+Purpose: create one reusable current-engine replay warehouse.
+
+## E002 — Ladder Forensics
+
+**Inputs:** E001 tables  
+**Accelerator:** None  
+**Internet:** Off
+
+**Outputs**
+- `open_loop_report.csv`
+- `bt_strength.csv`
+
+Purpose: measure opponent-adjusted strength and test whether strong agents are actually macro-open-loop.
+
+## E003 — Macro Strategy Miner
+
+**Inputs:** E001 + E002  
+**Accelerator:** None  
+**Internet:** Off
+
+**Outputs**
+- `archetype_profiles.parquet`
+- `macro_library.json`
+
+Purpose: discover recurring ladder strategies and distill them into robust target schedules.
+
+## E004 — Predictive Models
+
+**Inputs:** replay warehouse + archetypes  
+**Accelerator:** None  
+**Internet:** Off
+
+**Outputs**
+- `learned_model.json`
+- model metrics
+
+Purpose: train future-supply and opponent-belief models using actor-grouped validation.
+
+## E005 — Robust Population CEM + Policy Zoo
+
+**Inputs:** repository/controller, recommended E003/E004 artifacts  
+**Accelerator:** None  
+**Internet:** Off
+
+**Outputs**
+- `cem_best.json`
+- `policy_params.json`
+- `policy_matchups.parquet`
+
+Purpose: search policies against a population, not one static bot.
+
+## E007 — Meta Equilibrium + Conditional Reactions + Probe Audit
+
+**Inputs**
+- E001 `turns.parquet`
+- E002 `bt_strength.csv`
+- E005 `policy_matchups.parquet`
+- optional `policy_params.json`
+
+**Accelerator:** None  
+**Internet:** Off
+
+**Outputs**
+- `reaction_events.parquet`
+- `reaction_profiles.parquet`
+- `reaction_archetypes.parquet`
+- `reaction_model.json`
+- `probe_thresholds.json`
+- `meta_artifact.json`
+
+Purpose: build the robust policy prior and understand how strong agents react under pressure.
+
+## E006 — Build Submission
+
+**Inputs**
+- repository source
+- promoted E004 model
+- promoted E007 meta artifact
+
+**Accelerator:** None  
+**Internet:** Off
+
+**Output**
+- `submission_v2.tar.gz`
+
+The final archive is flat and contains:
+
+```text
+main.py
+predictive_agent.py
+parametric_agent.py
+base_controller.py
+runtime_model.py
+meta_runtime.py
+learned_model.json
+```
 
 ---
 
-## Local setup
+# Local development
 
-Python 3.11+ is recommended.
+Python 3.11+ recommended.
 
 ```bash
 python -m venv .venv
-source .venv/bin/activate       # Windows: .venv\Scripts\activate
+source .venv/bin/activate
 pip install -e .
-```
-
-Or:
-
-```bash
-pip install -r requirements.txt
-```
-
-Run tests:
-
-```bash
 pytest -q
 ```
 
-Expected current baseline:
-
-```text
-6 passed
-```
-
-Build the competition bundle:
+Build and validate the submission:
 
 ```bash
 python scripts/build_submission.py
 python scripts/check_submission.py artifacts/submission_v2.tar.gz
 ```
 
-The Kaggle archive must have `main.py` at its root. Do **not** upload this whole repository as the competition submission.
-
----
-
-# Kaggle CPU notebook pipeline
-
-All research notebooks are designed to run with:
-
-```text
-Accelerator: None
-```
-
-The notebooks intentionally separate acquisition from modeling so expensive repeated replay parsing is avoided.
-
-## E000 — Episode Index Audit
-
-**Notebook**: `notebooks/00_episode_index_audit.ipynb`
-
-**Kaggle inputs**
-
-1. `kaggle/kaggriculture-episodes-index`
-2. this repository or an uploaded copy of the suite
-
-**Accelerator**: None  
-**Internet**: Off  
-**Expected input files**: CSV / Parquet / JSON files supplied by the Episodes Index dataset. The notebook discovers the schema rather than assuming filenames.
-
-**Outputs**
-
-```text
-episode_schema_report.csv
-episode_catalog.parquet
-```
-
-Purpose: identify episode IDs, submission/team metadata, timestamps, ratings if available, and current-engine filtering fields.
-
-## E001 — Replay Factory
-
-**Notebook**: `notebooks/01_replay_factory.ipynb`
-
-**Kaggle inputs**
-
-1. E000 artifacts
-2. replay JSON files, if already downloaded
-
-**Accelerator**: None  
-**Internet**: On only if replay acquisition is required; Off otherwise.  
-**Key files expected**: episode catalog plus `episode-*-replay.json` files when parsing locally.
-
-**Outputs**
-
-```text
-turns.parquet
-daily_macros.parquet
-replay_manifest.parquet
-```
-
-Purpose: create one reusable research warehouse rather than reparsing raw JSON in every experiment.
-
-## E002 — Ladder Forensics
-
-**Notebook**: `notebooks/02_ladder_forensics.ipynb`
-
-**Kaggle inputs**: E001 artifacts  
-**Accelerator**: None  
-**Internet**: Off
-
-**Outputs**
-
-```text
-open_loop_report.csv
-bt_strength.csv
-ladder_forensics.json
-```
-
-Purpose:
-
-- estimate opponent-adjusted strength with Bradley-Terry;
-- quantify open-loop behavior;
-- compare raw cash with actual win probability;
-- identify repeatedly strong submissions worth archetyping.
-
-## E003 — Macro Strategy Miner
-
-**Notebook**: `notebooks/03_macro_strategy_miner.ipynb`
-
-**Kaggle inputs**: E001 + E002 artifacts  
-**Accelerator**: None  
-**Internet**: Off
-
-**Outputs**
-
-```text
-archetype_profiles.parquet
-macro_library.json
-```
-
-Purpose: cluster strong trajectories by farm composition and timing, then distill robust day-indexed target schedules instead of brittle raw action playback.
-
-## E004 — Predictive Models
-
-**Notebook**: `notebooks/04_predictive_models_cpu.ipynb`
-
-**Kaggle inputs**: E001 + E003 artifacts  
-**Accelerator**: None  
-**Internet**: Off
-
-**Outputs**
-
-```text
-learned_model.json
-model_metrics.json
-```
-
-Initial targets:
-
-- opponent sell volume over the next 24 turns;
-- opponent macro archetype;
-- win-probability/value diagnostics.
-
-Only features available to the live agent are eligible for the runtime model.
-
-## E005 — CEM Best-Response Search
-
-**Notebook**: `notebooks/05_cem_best_response_search.ipynb`
-
-**Kaggle inputs**: E003 + E004 artifacts  
-**Accelerator**: None  
-**Internet**: Off
-
-**Outputs**
-
-```text
-cem_best.json
-policy_by_archetype.json
-```
-
-Purpose: optimize a compact macro policy vector against the policy zoo in both seats across many seeds.
-
-## E006 — Build Submission
-
-**Notebook**: `notebooks/06_build_v2_submission.ipynb`
-
-**Kaggle inputs**: promoted E004/E005 artifacts plus repository source  
-**Accelerator**: None  
-**Internet**: Off
-
-**Output**
-
-```text
-submission_v2.tar.gz
-```
-
-Purpose: embed only promoted tiny artifacts into the deterministic controller and verify the archive before submission.
-
----
-
-## Replay acquisition from the ladder
-
-Kaggle's simulation CLI can list a submission's episodes and download replays. The workflow is:
+Run a both-seat local tournament:
 
 ```bash
-kaggle competitions submissions kaggriculture
-kaggle competitions episodes <SUBMISSION_ID> -v
-kaggle competitions replay <EPISODE_ID> -p ./replays
+python scripts/tournament.py \
+  --a submission.predictive_agent:agent \
+  --b baselines.v1.main:agent \
+  -n 16
 ```
 
-For public-safe top-team scouting, use the leaderboard/team-submission workflow supported by the Kaggle CLI and store only data made public through the competition tooling.
+Build a meta artifact from policy-zoo results:
 
-The repository intentionally does not embed scraped private information or credentials.
+```bash
+python scripts/build_meta_artifact.py artifacts/policy_matchups.parquet \
+  --policy-params artifacts/policy_params.json \
+  --out artifacts/meta_artifact.json
+```
 
 ---
 
 # Engine contract
 
-**The engine source is the source of truth.** Documentation and community explanations are useful, but strategy code is written against tested interpreter behavior.
+**The engine source is the source of truth.**
 
-Important current invariants include:
+Important tested invariants include:
 
-1. A newly planted crop begins already counting as unwatered. If it is not watered before end-of-day refresh, it becomes a weed that night.
-2. Animal care + feed banks **+1** pending care bonus per qualifying day.
-3. Fertilizer is sellable by the market engine.
-4. `DIG` does not remove an occupied animal structure.
-5. Movement onto and through `LOCKED` cells is allowed, while tile-mutating operations on locked cells are not.
-6. Shed access is through the four center cells `(4,4)`, `(5,4)`, `(4,5)`, `(5,5)` on the 10×10 board.
-7. Temporary farm hands disappear every night and must be rehired.
-8. The shed has finite capacity; overflow can destroy value.
-9. Farm actions execute before market orders on the same turn.
-10. The final reward is bank cash, so terminal liquidation matters.
+1. planting day already counts as unwatered;
+2. an unwatered new crop becomes a weed that night;
+3. animal care + feed banks +1 pending bonus;
+4. fertilizer can be sold;
+5. occupied animal structures cannot be dug;
+6. units may move through locked cells;
+7. tile-mutating actions on locked cells fail;
+8. shed access is the four center cells;
+9. temporary hands disappear every night;
+10. farm actions resolve before market orders;
+11. shed capacity is finite;
+12. final reward is bank cash.
 
 See `docs/ENGINE_CONTRACT.md` and `tests/`.
 
 ---
 
-# Evaluation protocol
+# Promotion protocol
 
-A candidate does **not** get promoted because it has a higher passive score.
+A candidate is promoted only if it passes all relevant gates:
 
-Promotion gates:
+1. engine regression tests;
+2. submission packaging/import smoke test;
+3. runtime well below the per-turn budget;
+4. both-seat held-out tournament improvement;
+5. improvement against multiple opponent archetypes;
+6. acceptable worst-archetype/CVaR performance;
+7. actor-grouped validation for learned components;
+8. no material increase in invalid/no-op actions;
+9. predictive intervention automatically falls back when confidence is low;
+10. active probes remain disabled unless separately proven.
 
-1. All engine regression tests pass.
-2. No meaningful increase in invalid/no-op actions.
-3. Runtime remains comfortably below the per-turn budget.
-4. Both-seat tournament win rate improves on held-out seeds.
-5. Improvement survives multiple opponent archetypes, not just one hand-picked bot.
-6. Learned components improve actor-grouped replay validation.
-7. The component is disabled automatically when confidence/evidence is inadequate.
-8. A leaderboard submission is used as confirmation, not as the primary optimizer.
-
-Recommended offline comparison:
-
-```text
-candidate vs baseline
-candidate vs premium-meta
-candidate vs wheat-heavy
-candidate vs livestock-heavy
-candidate vs shop-adaptive
-candidate vs prior champion
-```
-
-Always alternate seats.
+The ladder is a confirmation environment, not our primary optimizer.
 
 ---
 
-# Why not pure RL yet?
+# Current status
 
-End-to-end RL has a much larger search problem:
+The first deterministic submission entered the ladder at the initial rating of 600. That is not itself evidence of strength or weakness.
 
-- hundreds of low-level movement and farm actions;
-- long delayed economic rewards;
-- shared-market interaction;
-- hidden opponent inventories;
-- random weeds and shop draws;
-- strict action-time budget.
+The V2 codebase now contains the full infrastructure for:
 
-Meanwhile, deterministic execution already solves much of the mechanical problem exactly.
+- replay mining;
+- open-loop analysis;
+- macro archetypes;
+- conditional-reaction archetypes;
+- future-supply prediction;
+- robust population CEM;
+- policy-zoo payoff matrices;
+- meta-equilibrium solving;
+- confidence-gated live policy selection;
+- experimental market-probe analysis;
+- deterministic fallback and packaging.
 
-That does not mean RL has no role. Promising later uses include:
-
-- value estimation;
-- residual corrections over macro policies;
-- opponent belief updates;
-- policy selection;
-- offline RL over replay-derived macro actions.
-
-But any learned system must beat the simpler hierarchy on held-out tournaments before promotion.
+The checked-in `submission/learned_model.json` intentionally contains no promoted learned weights yet. Until E004/E005/E007 generate validated artifacts, the agent remains on its deterministic fallback.
 
 ---
 
-# Experiment philosophy
+# Near-term roadmap
 
-Treat every ladder submission as an expensive experiment.
+1. Run E000 on the official Episodes Index.
+2. Acquire a large recent current-engine replay sample.
+3. Measure which top agents are truly open-loop.
+4. Build macro and reaction archetypes from strong actors.
+5. Train future opponent-supply and archetype models.
+6. Expand the executable policy zoo.
+7. Run robust CEM across both seats and many seeds.
+8. Solve the policy-zoo meta game.
+9. Distill the tiny artifact into the runtime selector.
+10. Promote one candidate and immediately mine its hosted games.
 
-Bad experiment:
-
-```text
-change routing + crop mix + animal mix + selling + model simultaneously
-```
-
-Good experiment:
-
-```text
-control       = current champion
-variant       = current champion + one strategic intervention
-offline A/B   = many seeds, both seats, policy zoo
-ladder A/B    = only after offline promotion
-```
-
-The five-submission daily allowance is best used for controlled validation and recovery, not blind parameter search.
+Longer term, RL remains interesting for value estimation, residual corrections, or offline macro-policy learning, but only after it beats this simpler hierarchy on held-out tournaments.
 
 ---
 
-# Near-term research roadmap
+## Reproducibility and safety
 
-### Phase 1 — Build the population dataset
-
-- audit the official Episodes Index;
-- download a recent, diverse set of public ladder episodes;
-- filter stale engine eras;
-- cache turn/day Parquet.
-
-### Phase 2 — Discover what actually wins
-
-- fit opponent-adjusted strength;
-- measure open-loopness;
-- identify dominant macro schedules;
-- quantify labor, land, crop, animal, and liquidation timing.
-
-### Phase 3 — Predict the shared market
-
-- forecast opponent 24-turn supply;
-- infer likely unsold inventory from public history where possible;
-- deploy only confidence-gated early-selling interventions.
-
-### Phase 4 — Search best responses
-
-- build a realistic policy zoo;
-- run CEM over macro parameters;
-- learn policy-by-archetype mappings;
-- optimize expected ladder win probability.
-
-### Phase 5 — Adaptive V2/V3
-
-- maintain belief over opponent archetypes;
-- use hysteresis to prevent policy thrashing;
-- select or blend best responses;
-- optionally add a small value/residual model.
-
----
-
-# Reproducibility and safety
-
-- Keep all research artifacts versioned by experiment ID and engine era.
-- Do not overwrite a promoted model without saving its metrics.
-- Do not use the whole repository as the Kaggle submission artifact.
-- Do not place Kaggle API credentials in this repository.
-- Treat public leaderboard notebooks/chat claims as hypotheses until reproduced.
-- Keep the exact controller operational even when learned artifacts are missing or malformed.
-
----
+- version experiments by engine era;
+- never train on stale mechanics without explicit tagging;
+- never include private replay fields as runtime features;
+- never commit Kaggle credentials;
+- never upload the entire repository as the competition artifact;
+- keep deterministic fallback operational if learned artifacts are missing or malformed;
+- treat community claims as hypotheses until reproduced.
 
 ## Disclaimer
 
-This repository is designed to maximize the chance of producing a top Kaggriculture submission through disciplined engineering and empirical iteration. No codebase can honestly guarantee first place before it has been evaluated against the evolving live population.
-
-The objective here is to make every iteration measurable, reproducible, and harder to fool ourselves with.
+This repository is designed to maximize the chance of producing a top Kaggriculture submission through disciplined engineering and empirical iteration. No codebase can honestly guarantee first place against an evolving live population before it has been tested there.

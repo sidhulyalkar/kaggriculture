@@ -1,185 +1,157 @@
 # Kaggle Notebook Runbook
 
-All notebooks are CPU-first. The intended execution order is **E000 -> E001A -> E001B -> E002 -> E003 -> E004 -> E005 -> E007 -> E006**. E006 remains the final build notebook even though E007 was added later.
+The recommended Kaggle workflow is now **three consolidated CPU notebooks**. The granular E000/E001A/E001B/E002/... notebooks remain in the repository as debugging fallbacks, but normal research should use the consolidated path to reduce repeated imports, serialization, and artifact shuffling.
 
-## E000 — Episode Index Audit
+## Primary 10 — Replay Warehouse + Ladder Forensics
+
+**Notebook**: `notebooks/10_replay_warehouse_forensics_cpu.ipynb`
+
+Combines: **E000 + E001A + E001B + E002**.
 
 **Inputs**
-- `kaggle/kaggriculture-episodes-index`
-- repository source / uploaded suite
+- required: `kaggle/kaggriculture-episodes-index`
+- optional: repository/code Dataset. If absent, the notebook clones `sidhulyalkar/kaggriculture` when Internet is enabled.
 
-**Accelerator**: None
+**Accelerator**: None / CPU
 
-**Internet**: Off
+**Internet**: **On**, because public replay acquisition uses Kaggle's official simulation CLI.
 
-**Key expected files**
-- any CSV/Parquet/JSON supplied by the Episodes Index dataset; schema is discovered dynamically.
+**CPU strategy**
+- schema-first discovery;
+- current-engine filtering when timestamps exist;
+- stratified episode sampling;
+- up to four concurrent replay downloads;
+- process-parallel replay parsing via Parquet shards;
+- restart-safe manifests;
+- one-time construction of the turn/day warehouse;
+- Bradley–Terry strength and open-loop analysis in the same job.
+
+**Default scale**: 300 episodes. After the entire pipeline is green, increase to roughly 1,000–3,000+ while monitoring runtime/storage.
 
 **Outputs**
 - `episode_schema_report.csv`
-- `episode_catalog.parquet`
-
-## E001A — Public Replay Acquisition
-
-**Inputs**
-- `kaggle/kaggriculture-episodes-index`
-- repository source / uploaded suite
-
-**Accelerator**: None
-
-**Internet**: **On**
-
-**Requirements**
-- Kaggriculture competition joined and rules accepted.
-- Kaggle CLI available/authenticated in the notebook session.
-
-**Outputs**
-- `replays/episode-<id>-replay.json`
+- `selected_episodes.csv`
 - `replay_download_manifest.csv`
-- `selected_episode_ids.csv`
-
-The Episodes Index contains episode metadata/IDs; it is not itself a directory of replay JSONs. E001A uses those IDs to download public replays through the official simulation-competition CLI. Start with ~250 episodes as a smoke test, then scale after E001B/E002 are green.
-
-## E001B — Replay Factory
-
-**Notebook**: currently `notebooks/01_replay_factory.ipynb`
-
-**Inputs**
-- repository source
-- E001A replay JSON directory, typically attached as a saved Kaggle output Dataset
-- optional E000 episode catalog
-
-**Accelerator**: None
-
-**Internet**: Off
-
-**Key expected files**
-- `episode-<id>-replay.json`
-
-**Outputs**
+- `replay_parse_manifest.csv`
 - `turns.parquet`
 - `daily_macros.parquet`
-
-If this stage reports `replays found: 0`, the replay-acquisition output was not attached. Run E001A first or attach a replay Dataset.
-
-## E002 — Ladder Forensics
-
-**Inputs**
-- `turns.parquet`
-- `daily_macros.parquet`
-
-**Accelerator**: None
-
-**Internet**: Off
-
-**Outputs**
-- `open_loop_report.csv`
+- `matchups.parquet`
 - `bt_strength.csv`
+- `open_loop_report.csv`
+- `warehouse_summary.json`
+- `repo_commit.txt`
 
-## E003 — Macro Strategy Miner
+Save the notebook output as a Dataset. Later stages do not need to download or parse those raw replays again.
+
+## Primary 11 — Strategy Mining + Predictive Models
+
+**Notebook**: `notebooks/11_strategy_models_cpu.ipynb`
+
+Combines: **E003 + E004 + replay-derived reaction research from E007**.
 
 **Inputs**
-- E001B tables
-- E002 strength report
+- required: output Dataset from notebook 10
+- optional code Dataset; otherwise enable Internet and the recorded Git commit is cloned/checked out.
 
-**Accelerator**: None
+**Accelerator**: None / CPU
 
-**Internet**: Off
+**Internet**: Off with a code Dataset; otherwise On only for repo bootstrap.
+
+**Jobs**
+- mine replay-derived macro archetypes;
+- build `macro_library.json`;
+- train the actor-grouped win diagnostic;
+- train 24-turn opponent sell/supply forecasting;
+- distill a tiny nearest-centroid opponent model;
+- mine conditional reactions around price/inventory shocks;
+- detect candidate market thresholds without enabling active probes.
 
 **Outputs**
 - `archetype_profiles.parquet`
 - `macro_library.json`
-
-## E004 — Predictive Models
-
-**Inputs**
-- turn/day warehouse
-- archetype artifacts
-
-**Accelerator**: None
-
-**Internet**: Off
-
-**Outputs**
+- `offline_archetype_model.json`
 - `learned_model.json`
-- model metrics
+- `model_metrics.json`
+- `reaction_events.parquet`
+- `reaction_profiles.parquet`
+- optional `reaction_archetypes.parquet` / `reaction_model.json`
+- `probe_thresholds.json`
+- `model_promotion_diagnostics.json`
+- `repo_commit.txt`
 
-The runtime artifact should contain only features legal at live inference time. Opponent-private replay fields may be labels, never features.
+Save this output as a Dataset for notebook 12.
 
-## E005 — Robust Population CEM + Policy Zoo
+## Primary 12 — Robust Search + Meta Equilibrium + Submission Panel
+
+**Notebook**: `notebooks/12_search_meta_submit_cpu.ipynb`
+
+Combines: **robust E005 + equilibrium E007 + E006**.
 
 **Inputs**
-- repository source / current controller
-- recommended E003 macro artifacts
-- optional E004 predictive artifact
+- required: notebook 11 output Dataset
+- recommended: notebook 10 output Dataset for provenance/diagnostics
+- optional code Dataset; otherwise enable Internet for pinned repo bootstrap.
 
-**Accelerator**: None
+**Accelerator**: None / CPU
 
-**Internet**: Off
+**CPU strategy**
+- translate mined replay archetypes into approximate ParametricMind opponents;
+- combine them with hand-authored V1/counter baselines;
+- parallelize CEM candidate evaluation across Kaggle CPU cores;
+- optimize expectation + worst-case + lower-tail CVaR rather than one brittle best response;
+- evaluate a policy zoo in both seats;
+- solve a robust meta-equilibrium;
+- build byte-identical-code experiment archives whose only controlled change is `runtime_flags` in the model artifact.
+
+**Default search budget**
+- CEM iterations: 4
+- population: 20
+- seeds: 4
+- both seats
+- up to four worker processes
+
+This is intentionally a balanced first production pass. Increase the budget only after end-to-end completion.
 
 **Outputs**
 - `cem_best.json`
 - `policy_params.json`
 - `policy_matchups.parquet`
-
-The serious objective is not a pure peak best response. Use `cem_optimize_population`, both seats, many seeds, and as broad a replay-derived opponent zoo as practical. The robust objective combines population expectation, worst-archetype value, and lower-tail CVaR.
-
-## E007 — Meta Equilibrium + Conditional Reactions + Probe Audit
-
-**Inputs**
-- E001B `turns.parquet`
-- E002 `bt_strength.csv`
-- E005 `policy_matchups.parquet`
-- optional E005 `policy_params.json`
-
-**Accelerator**: None
-
-**Internet**: Off
-
-**Outputs**
-- `reaction_events.parquet`
-- `reaction_profiles.parquet`
-- `reaction_archetypes.parquet`
-- `reaction_model.json`
-- `probe_thresholds.json`
 - `meta_artifact.json`
+- `learned_model_promoted.json`
+- `final_search_summary.json`
+- `experiments/S0_control.tar.gz`
+- `experiments/S1_robust_fixed.tar.gz`
+- `experiments/S2_market_only.tar.gz`
+- `experiments/S3_meta_only.tar.gz`
+- `experiments/S4_full.tar.gz`
+- `experiments/experiment_manifest.json`
 
-This stage performs three jobs:
+## Recommended next ladder experiment
 
-1. Cluster **conditional reactions** to price shocks / market floods, weighted by opponent-adjusted strength.
-2. Solve the policy-zoo meta game and build a robust equilibrium prior.
-3. Detect candidate hard market thresholds for possible future probes.
+Use the current V1 submission as the historical control and spend the next four slots on orthogonal interventions:
 
-`probe_thresholds.json` is research output only. It does **not** activate live probing.
+1. `S1_robust_fixed`: tests whether offline macro optimization itself improves the agent.
+2. `S2_market_only`: tests only future-supply/predictive selling.
+3. `S3_meta_only`: tests only opponent belief + dynamic macro-policy selection.
+4. `S4_full`: tests their interaction.
 
-## E006 — Submission Build
+Keep the fifth daily slot in reserve for a packaging/runtime failure or a refinement of the early winner. `S0_control` is available when a fresh same-day control is more valuable than that reserve.
 
-**Inputs**
-- repository `submission/` source
-- E004 `learned_model.json` if promoted
-- E007 `meta_artifact.json` if promoted
-- E005 `cem_best.json` only as a legacy fallback when no meta artifact is available
+Do not crown a variant from one or two hosted games. Compare rating movement together with episode count, opponent strength, final cash, replay failure modes, and whether the intended component actually changed behavior.
 
-**Accelerator**: None
+## Runtime safety
 
-**Internet**: Off
+The submission runtime now supports explicit feature gates in `learned_model.json`:
+- `meta_selection`
+- `predictive_selling`
+- `fixed_policy`
 
-**Outputs**
-- `submission_v2.tar.gz`
+All experiment archives use the same Python runtime code. The module-global policy is reset explicitly on step 0 so belief/meta state cannot leak across episodes.
 
-The archive contains:
-- `main.py`
-- `predictive_agent.py`
-- `parametric_agent.py`
-- `base_controller.py`
-- `runtime_model.py`
-- `meta_runtime.py`
-- `learned_model.json`
+## Granular fallback workflow
 
-Before submission:
-1. inspect the flat tar root;
-2. smoke-test `main.agent`;
-3. run both-seat held-out tournaments;
-4. require robust/worst-archetype performance, not only mean score;
-5. profile runtime well below the one-second action budget;
-6. keep active probes disabled unless a separate paired promotion test clears them.
+For debugging a single stage, the older notebooks remain valid:
+
+`E000 -> E001A -> E001B -> E002 -> E003 -> E004 -> E005 -> E007 -> E006`.
+
+The Episodes Index contains metadata/IDs, not replay JSON itself. If a granular replay factory reports `replays found: 0`, run/attach E001A first.

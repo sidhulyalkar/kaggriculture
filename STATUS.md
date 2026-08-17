@@ -1,6 +1,6 @@
 # Project Status
 
-Last updated: 2026-08-16
+Last updated: 2026-08-17
 
 ## Live ladder
 
@@ -11,24 +11,39 @@ Last updated: 2026-08-16
 ## Current champion code
 
 - `baselines/v1/`: first submitted deterministic TournamentMind family.
-- `submission/`: V2 scaffold with deterministic fallback and optional predictive runtime model.
+- `submission/`: V2 runtime with deterministic fallback, future-supply forecasting, archetype posterior, and a confidence-gated robust meta-policy selector.
 
-## Local quality gates
+## V2.3 research stack now implemented
 
-- Unit/regression suite: 6 tests passing.
-- Submission package builder: implemented.
-- Exact-engine invariant coverage: planting-day water, +1 animal care bonus, occupied DIG, locked movement, runtime feature construction.
+- `src/kagv2/equilibrium.py`: rectangular zero-sum meta solver + robust population mix.
+- `src/kagv2/reactions.py`: strength-weighted conditional-reaction mining around market shocks.
+- `src/kagv2/probes.py`: experimental threshold/market-probe analysis with explicit promotion gate.
+- `src/kagv2/cem.py`: pure best-response CEM plus robust population CEM using expectation + worst-case + CVaR.
+- `submission/meta_runtime.py`: tiny pure-stdlib hot-path selector; no live CEM.
+- `submission/runtime_model.py`: soft archetype posterior, not only hard nearest-cluster classification.
+- `notebooks/05_cem_best_response_search.ipynb`: exports `policy_matchups.parquet` and `policy_params.json`.
+- `notebooks/07_meta_equilibrium_and_probes.ipynb`: builds reaction archetypes, probe-threshold diagnostics, and `meta_artifact.json`.
+- `notebooks/06_build_v2_submission.ipynb`: embeds promoted meta artifacts and packages `meta_runtime.py`.
+
+## Local / CI quality gates
+
+- Existing engine mirror and runtime smoke tests retained.
+- New tests cover equilibrium convergence, robust mixture validity, meta-selector hysteresis, and probe price-path semantics.
+- GitHub Actions CI is enabled on every push and currently passing for the code-bearing V2 meta changes.
+- Submission builder compiles all runtime Python and packages a flat `submission_v2.tar.gz` with `main.py` at root.
 
 ## Research queue
 
 1. Run E000 on the official Kaggriculture Episodes Index.
 2. Build a recent current-engine replay warehouse.
 3. Quantify open-loopness of strong public submissions.
-4. Mine macro archetypes.
-5. Train 24-turn opponent sell-volume model.
-6. Run CEM against replay-derived policy zoo.
-7. Promote only components that improve held-out pairwise win rate.
+4. Mine macro archetypes **and conditional reaction archetypes**.
+5. Train 24-turn opponent sell-volume + archetype-posterior models.
+6. Run robust population CEM against a replay-derived policy zoo.
+7. Solve the policy-zoo meta game and embed the robust mixture.
+8. Evaluate market probes offline; keep them disabled unless paired tournaments show a positive lower confidence bound.
+9. Promote only components that improve held-out pairwise win rate and worst-archetype performance.
 
 ## Promotion rule
 
-The next ladder submission should be made only after it either fixes a concrete hosted failure or beats the current champion in a controlled offline tournament.
+The next ladder submission should be made only after it either fixes a concrete hosted failure or beats the current champion in a controlled offline tournament. Pure mean-score gains are insufficient; the candidate must also survive both seats, multiple archetypes, engine-regression tests, runtime checks, and a robustness gate.

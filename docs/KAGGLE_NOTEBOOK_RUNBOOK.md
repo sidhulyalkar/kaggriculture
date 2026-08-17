@@ -1,6 +1,6 @@
 # Kaggle Notebook Runbook
 
-All notebooks are CPU-first. The intended execution order is **E000 -> E001 -> E002 -> E003 -> E004 -> E005 -> E007 -> E006**. E006 remains the final build notebook even though E007 was added later.
+All notebooks are CPU-first. The intended execution order is **E000 -> E001A -> E001B -> E002 -> E003 -> E004 -> E005 -> E007 -> E006**. E006 remains the final build notebook even though E007 was added later.
 
 ## E000 — Episode Index Audit
 
@@ -19,15 +19,39 @@ All notebooks are CPU-first. The intended execution order is **E000 -> E001 -> E
 - `episode_schema_report.csv`
 - `episode_catalog.parquet`
 
-## E001 — Replay Factory
+## E001A — Public Replay Acquisition
 
 **Inputs**
-- E000 `episode_catalog.parquet`
-- downloaded replay JSON directory
+- `kaggle/kaggriculture-episodes-index`
+- repository source / uploaded suite
 
 **Accelerator**: None
 
-**Internet**: On only if downloading replays in the notebook; otherwise Off.
+**Internet**: **On**
+
+**Requirements**
+- Kaggriculture competition joined and rules accepted.
+- Kaggle CLI available/authenticated in the notebook session.
+
+**Outputs**
+- `replays/episode-<id>-replay.json`
+- `replay_download_manifest.csv`
+- `selected_episode_ids.csv`
+
+The Episodes Index contains episode metadata/IDs; it is not itself a directory of replay JSONs. E001A uses those IDs to download public replays through the official simulation-competition CLI. Start with ~250 episodes as a smoke test, then scale after E001B/E002 are green.
+
+## E001B — Replay Factory
+
+**Notebook**: currently `notebooks/01_replay_factory.ipynb`
+
+**Inputs**
+- repository source
+- E001A replay JSON directory, typically attached as a saved Kaggle output Dataset
+- optional E000 episode catalog
+
+**Accelerator**: None
+
+**Internet**: Off
 
 **Key expected files**
 - `episode-<id>-replay.json`
@@ -35,7 +59,8 @@ All notebooks are CPU-first. The intended execution order is **E000 -> E001 -> E
 **Outputs**
 - `turns.parquet`
 - `daily_macros.parquet`
-- replay manifest
+
+If this stage reports `replays found: 0`, the replay-acquisition output was not attached. Run E001A first or attach a replay Dataset.
 
 ## E002 — Ladder Forensics
 
@@ -54,7 +79,7 @@ All notebooks are CPU-first. The intended execution order is **E000 -> E001 -> E
 ## E003 — Macro Strategy Miner
 
 **Inputs**
-- E001 tables
+- E001B tables
 - E002 strength report
 
 **Accelerator**: None
@@ -102,7 +127,7 @@ The serious objective is not a pure peak best response. Use `cem_optimize_popula
 ## E007 — Meta Equilibrium + Conditional Reactions + Probe Audit
 
 **Inputs**
-- E001 `turns.parquet`
+- E001B `turns.parquet`
 - E002 `bt_strength.csv`
 - E005 `policy_matchups.parquet`
 - optional E005 `policy_params.json`

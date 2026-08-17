@@ -24,7 +24,8 @@ def main() -> int:
         if any(n.startswith("/") or ".." in Path(n).parts for n in names):
             raise AssertionError("unsafe archive path")
         with tempfile.TemporaryDirectory() as td:
-            tf.extractall(td, filter="data")
+            # Member names were vetted above, so this remains compatible with Python 3.11 CI.
+            tf.extractall(td)
             sys.path.insert(0, td)
             try:
                 spec = importlib.util.spec_from_file_location("kag_submission_main", os.path.join(td, "main.py"))

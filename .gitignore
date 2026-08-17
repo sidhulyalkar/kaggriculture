@@ -1,0 +1,22 @@
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+venv/
+.ipynb_checkpoints/
+.DS_Store
+
+# Generated research data
+*.parquet
+replays/
+logs/
+working/
+cache/
+
+# Generated model/search outputs unless explicitly promoted
+artifacts/*.tar.gz
+artifacts/*.json
+!submission/learned_model.json
+
+# Kaggle credentials
+kaggle.json

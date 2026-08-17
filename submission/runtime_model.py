@@ -29,6 +29,9 @@ def feature_dict(obs):
 def vector(obs,names=FEATURES):
  d=feature_dict(obs);return [float(d.get(n,0)) for n in names]
 def dot(a,b):return sum(x*y for x,y in zip(a,b))
+def _norm(xs):
+ xs=[max(0.,float(x)) for x in xs];s=sum(xs)
+ return [x/s for x in xs] if s>0 else ([1./len(xs)]*len(xs) if xs else [])
 
 class ModelBundle:
  def __init__(self,path=None):
@@ -41,12 +44,23 @@ class ModelBundle:
   if not m:return {p:0. for p in PRODUCTS}
   x=vector(obs,m.get("features",FEATURES));co=m["coef"];it=m["intercept"];vals=[max(0.,dot(w,x)+b) for w,b in zip(co,it)]
   return {t.split("_")[-1]:v for t,v in zip(m["targets"],vals)}
- def archetype(self,obs):
+ def archetype_distribution(self,obs):
   m=self.obj.get("archetype")
-  if not m:return None,0.0
+  if not m:return [],0.0
   names=m.get("runtime_features") or m.get("features")
-  if not names or any(n not in FEATURES for n in names):return None,0.0
+  if not names or any(n not in FEATURES for n in names):return [],0.0
   x=vector(obs,names);mean=m.get("mean",[0]*len(x));scale=m.get("scale",[1]*len(x));z=[(a-b)/(s if abs(s)>1e-9 else 1) for a,b,s in zip(x,mean,scale)]
-  ds=[sum((a-b)**2 for a,b in zip(z,c)) for c in m.get("centroids",[])];
-  if not ds:return None,0.0
-  order=sorted(range(len(ds)),key=ds.__getitem__);best=order[0];gap=(ds[order[1]]-ds[best]) if len(order)>1 else 1.;conf=1-math.exp(-max(0,gap));return best,conf
+  centers=m.get("centroids",[]) or []
+  if not centers:return [],0.0
+  ds=[sum((a-b)**2 for a,b in zip(z,c)) for c in centers]
+  # Soft nearest-centroid posterior.  Temperature is stored with the model so
+  # E004 can calibrate it on held-out actors instead of hard-coding confidence.
+  temp=max(1e-6,float(m.get("posterior_temperature",1.0)))
+  md=min(ds);w=[math.exp(-min(60.,max(0.,(d-md)/(2*temp)))) for d in ds];p=_norm(w)
+  if len(p)<=1:return p,1.0 if p else 0.0
+  h=-sum(q*math.log(max(q,1e-12)) for q in p)/math.log(len(p));conf=max(0.,min(1.,1-h))
+  return p,conf
+ def archetype(self,obs):
+  p,conf=self.archetype_distribution(obs)
+  if not p:return None,0.0
+  best=max(range(len(p)),key=p.__getitem__);return best,conf

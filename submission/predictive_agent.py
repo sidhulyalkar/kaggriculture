@@ -12,16 +12,23 @@ except Exception:
 MODEL_PATH=os.path.join(os.path.dirname(__file__),"learned_model.json")
 
 class PredictiveMind(ParametricMind):
-    """Selective predictive V2.
+    """Selective predictive V2 with experiment-safe feature gates.
 
-    Learned components may choose among *precomputed macro policies* and may
-    accelerate selling ahead of predicted supply floods.  Mechanical execution
-    remains inside the deterministic HarvestMind controller.  If no promoted
-    artifact exists, behavior is exactly the deterministic parametric fallback.
+    Expensive work is completed offline.  At runtime the learned artifact may:
+    1) choose among precomputed macro policies, and/or
+    2) accelerate premium-product sales before a predicted supply flood.
+
+    Mechanical execution remains deterministic.  ``runtime_flags`` in
+    ``learned_model.json`` lets leaderboard experiments disable either learned
+    component without changing any other code.
     """
     def __init__(self):
         super().__init__(DEFAULT_PARAMS)
         self.model=ModelBundle(MODEL_PATH)
+        self.flags=dict((self.model.obj or {}).get("runtime_flags") or {})
+        self.use_meta=bool(self.flags.get("meta_selection",True))
+        self.use_predictive_selling=bool(self.flags.get("predictive_selling",True))
+        self.fixed_policy=self.flags.get("fixed_policy")
         self.selector=MetaPolicySelector(self.model.obj)
         self.active_cluster=None
         self.cluster_conf=0.0
@@ -34,25 +41,35 @@ class PredictiveMind(ParametricMind):
         p=mp.get(str(self.active_cluster)) if self.active_cluster is not None else None
         return dict(p or {})
 
+    def _fixed_params(self):
+        if not self.fixed_policy or not self.selector.available():
+            return {}
+        if self.fixed_policy not in self.selector.names:
+            return {}
+        self.selector.current=self.fixed_policy
+        self.selected_policy=self.fixed_policy
+        return self.selector.current_params()
+
     def _update_belief(self,obs):
         day=int(obs.get("day",0))
         if day==self.last_belief_day:return
         self.last_belief_day=day
+
         posterior,conf=self.model.archetype_distribution(obs)
         self.posterior=posterior
         self.cluster_conf=float(conf)
         if posterior:
             self.active_cluster=max(range(len(posterior)),key=posterior.__getitem__)
 
-        # Preferred path: robust equilibrium/CEM policy zoo distilled offline.
-        selected=self.selector.update(day,posterior,self.cluster_conf)
-        self.selected_policy=selected
-        chosen=self.selector.current_params() if self.selector.available() else {}
+        chosen=self._fixed_params()
+        if not chosen and self.use_meta:
+            selected=self.selector.update(day,posterior,self.cluster_conf)
+            self.selected_policy=selected
+            chosen=self.selector.current_params() if self.selector.available() else {}
 
-        # Backward-compatible path for E005 artifacts produced before the meta
-        # equilibrium layer existed.
-        if not chosen and self.active_cluster is not None and self.cluster_conf>=.60:
-            chosen=self._legacy_archetype_params()
+            # Backward-compatible path for older per-archetype CEM artifacts.
+            if not chosen and self.active_cluster is not None and self.cluster_conf>=.60:
+                chosen=self._legacy_archetype_params()
 
         self.params=dict(DEFAULT_PARAMS)
         self.params.update(chosen or {})
@@ -60,12 +77,14 @@ class PredictiveMind(ParametricMind):
 
     def _sell_orders(self,obs,counts):
         orders=super()._sell_orders(obs,counts)
+        if not self.use_predictive_selling:
+            return orders
         forecast=self.model.supply(obs)
         if not forecast:return orders
         priv=obs.get("private",{}) or {};shed=priv.get("shed",{}) or {};market=obs.get("market",{}) or {};prices=market.get("prices",{}) or {}
         already={o[1] for o in orders if isinstance(o,list) and len(o)>1 and o[0]=="SELL"}
-        # Predictive selling is intentionally restricted to premium products.
-        # It can move a sale earlier, but never alters feed reserves or mechanics.
+        # Prediction may move a sale earlier, but never alter feed reserves or
+        # low-level mechanics.  Only premium products are eligible.
         for p in ("STRAWBERRY","MELON","MILK","WOOL"):
             q=int(shed.get(p,0) or 0)
             if p not in already and q>0 and forecast.get(p,0)>=8 and float(prices.get(p,BASE[p]))>=.72*BASE[p]:
@@ -76,5 +95,11 @@ class PredictiveMind(ParametricMind):
         self._update_belief(obs)
         return super().act(obs)
 
-_POLICY=PredictiveMind()
-def agent(obs,configuration=None):return _POLICY.act(obs)
+_POLICY=None
+def agent(obs,configuration=None):
+    """Kaggle entry point with an explicit per-episode state reset."""
+    global _POLICY
+    step=int((obs or {}).get("step",0) or 0)
+    if _POLICY is None or step==0:
+        _POLICY=PredictiveMind()
+    return _POLICY.act(obs)

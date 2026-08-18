@@ -1,0 +1,28 @@
+{
+  "version": 1,
+  "repo_commit": "df23881cda684df7b8f078cb454d2253eda7202b",
+  "selected_candidate": "pure_soil",
+  "selection_reason": "No hybrid cleared +0.03 held-out robust gain with >=90% Soil passive cash. Selected exact Soil reference.",
+  "selected_stats": {
+    "candidate": "pure_soil",
+    "families": 6,
+    "mean_family_score": 0.8055555555555555,
+    "worst_family_score": 0.375,
+    "lower40_cvar": 0.611111111111111,
+    "robust_score": 0.6590277777777778,
+    "mean_margin": 3109.375,
+    "invalid_games": 0,
+    "mean_ms": 0.2583999737332374,
+    "max_ms": 142.32621600012862,
+    "passive_cash": 171985.0,
+    "passive_std": 14646.659164009609
+  },
+  "runner_up": "pure_score3094",
+  "screen_seeds": [71001, 71002],
+  "heldout_seeds": [72001, 72002, 72003, 72004, 72005, 72006],
+  "promotion_gate": {
+    "min_robust_gain_vs_soil": 0.03,
+    "min_passive_cash_ratio_vs_soil": 0.9,
+    "invalid_games": 0
+  }
+}

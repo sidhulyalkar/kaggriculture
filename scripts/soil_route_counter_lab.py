@@ -383,34 +383,46 @@ def add_families(g):
     rev={}
     for fam,members in FAMILIES.items():
         for x in members:rev[x]=fam
-    g=g.copy();g["family"]=g.opponent.map(rev).fillna(g.opponent)
+    g=g.copy()
+    g["family"]=g.opponent.map(rev).fillna(g.opponent)
     return g
 
 
 def metrics(games):
-    g=add_families(games);ok=g[g.ok==True].copy()
+    g=add_families(games)
+    ok=g[g.ok==True].copy()
     fam=(ok.groupby(["candidate","family"])
          .agg(games=("score","size"),score=("score","mean"),margin=("margin","mean"))
          .reset_index())
     rows=[]
     for cand,x in fam.groupby("candidate"):
-        vals=np.sort(x.score.to_numpy(float));k=max(1,int(math.ceil(.4*len(vals))))
+        vals=np.sort(x.score.to_numpy(float))
+        k=max(1,int(math.ceil(.4*len(vals))))
         cg=g[g.candidate==cand];good=cg[cg.ok==True]
         amap=x[x.family=="adaptive_lineage"]
         rows.append({
-            "candidate":cand,"mean_family_score":float(vals.mean()),
-            "worst_family_score":float(vals.min()),"lower40_cvar":float(vals[:k].mean()),
+            "candidate":cand,
+            "mean_family_score":float(vals.mean()),
+            "worst_family_score":float(vals.min()),
+            "lower40_cvar":float(vals[:k].mean()),
             "robust_score":float(.55*vals.mean()+.25*vals.min()+.20*vals[:k].mean()),
             "adaptive_lineage_score":float(amap.score.iloc[0]) if len(amap) else np.nan,
-            "mean_margin":float(good.margin.mean()),"invalid_games":int((cg.ok!=True).sum()),
-            "mean_ms":float(good.mean_ms.mean()),"max_ms":float(good.max_ms.max()),
+            "mean_margin":float(good.margin.mean()),
+            "invalid_games":int((cg.ok!=True).sum()),
+            "mean_ms":float(good.mean_ms.mean()),
+            "max_ms":float(good.max_ms.max()),
         })
     return pd.DataFrame(rows),fam
 
 
 def passive_cash(candidate_roots,names,worker,repo,work,workers):
     p=work/"passive.py"
-    p.write_text('def agent(observation, configuration=None):\\n    return {"farmer":["PASS"],"hands":[],"market":[]}\\n')
+    # IMPORTANT: write real newlines. The previous version emitted literal "\\n"
+    # sequences, making passive.py invalid Python and causing every passive game to fail.
+    p.write_text(
+        'def agent(observation, configuration=None):\n'
+        '    return {"farmer":["PASS"],"hands":[],"market":[]}\n'
+    )
     jobs=[]
     for name in names:
         for seed in [85001,85002]:
@@ -418,8 +430,19 @@ def passive_cash(candidate_roots,names,worker,repo,work,workers):
                 jobs.append((candidate_roots[name]/"main.py",p,seed*10+seat,seat,
                              {"candidate":name,"seed":seed,"seat":seat}))
     g=parallel(jobs,worker,repo,workers)
-    return (g[g.ok==True].groupby("candidate")
-            .agg(passive_cash=("cash","mean"),passive_std=("cash","std")).reset_index())
+    good=g[g.ok==True].copy()
+    if good.empty or "cash" not in good.columns:
+        failures=g.loc[g.ok!=True, ["candidate","error"]].head(20).to_dict(orient="records")
+        raise RuntimeError(
+            "All passive-baseline games failed. This is a harness failure, not an input issue. "
+            f"First failures: {failures}"
+        )
+    missing=sorted(set(names)-set(good.candidate.unique()))
+    if missing:
+        print("WARNING: no successful passive baseline for:", missing)
+    return (good.groupby("candidate")
+            .agg(passive_cash=("cash","mean"),passive_std=("cash","std"))
+            .reset_index())
 
 
 def package(root: Path,out: Path):
@@ -436,70 +459,127 @@ def main():
     ap.add_argument("--workers",type=int,default=min(4,os.cpu_count() or 2))
     args=ap.parse_args()
 
-    input_root=Path(args.input_root);work=Path(args.work);work.mkdir(parents=True,exist_ok=True)
+    input_root=Path(args.input_root)
+    work=Path(args.work);work.mkdir(parents=True,exist_ok=True)
     repo=clone_repo(work)
-    commit=subprocess.run(["git","-C",str(repo),"rev-parse","HEAD"],capture_output=True,text=True).stdout.strip()
+    commit=subprocess.run(["git","-C",str(repo),"rev-parse","HEAD"],
+                          capture_output=True,text=True).stdout.strip()
     print("repo commit",commit)
+
     agents=discover(input_root,work)
     missing=set(PATTERNS)-set(agents)
-    if missing:raise RuntimeError("Missing required public inputs: "+", ".join(sorted(missing)))
+    if missing:
+        raise RuntimeError("Missing required public inputs: "+", ".join(sorted(missing)))
 
-    cfgs=configs();roots={name:make_candidate(work,agents["soil"],name,cfg) for name,cfg in cfgs.items()}
-    (work/"candidate_configs.json").write_text(json.dumps(cfgs,indent=2));print("candidates",len(roots))
+    cfgs=configs()
+    roots={name:make_candidate(work,agents["soil"],name,cfg) for name,cfg in cfgs.items()}
+    (work/"candidate_configs.json").write_text(json.dumps(cfgs,indent=2))
+    print("candidates",len(roots))
+
     worker=work/"match_worker.py";worker.write_text(WORKER)
 
     screen_opps=["adaptive","soil","v16","ranker","strict","findings"]
     screen_seeds=[83001,83002,83003]
     print("Stage 1 targeted screen")
-    sg=parallel(jobs_for(roots,agents,list(roots),screen_seeds,screen_opps),worker,repo,args.workers)
-    sg.to_parquet(work/"v31_screen_games.parquet",index=False)
-    sm,sfam=metrics(sg);pc=passive_cash(roots,list(roots),worker,repo,work,args.workers);sm=sm.merge(pc,on="candidate",how="left")
+    screen_path=work/"v31_screen_games.parquet"
+    if screen_path.exists():
+        print("Resuming: reusing", screen_path)
+        sg=pd.read_parquet(screen_path)
+    else:
+        sg=parallel(jobs_for(roots,agents,list(roots),screen_seeds,screen_opps),
+                    worker,repo,args.workers)
+        sg.to_parquet(screen_path,index=False)
+    sm,sfam=metrics(sg)
+    pc=passive_cash(roots,list(roots),worker,repo,work,args.workers)
+    sm=sm.merge(pc,on="candidate",how="left")
+
     soil=sm[sm.candidate=="pure_soil"].iloc[0]
     sm["adaptive_gain"]=sm.adaptive_lineage_score-soil.adaptive_lineage_score
     sm["robust_delta"]=sm.robust_score-soil.robust_score
     sm["passive_ratio"]=sm.passive_cash/soil.passive_cash
-    sm["screen_selection_score"]=sm.robust_score+.30*sm.adaptive_gain-.20*np.maximum(0,.97-sm.passive_ratio)
+    sm["screen_selection_score"]=(
+        sm.robust_score + .30*sm.adaptive_gain
+        - .20*np.maximum(0,.97-sm.passive_ratio)
+    )
     sm=sm.sort_values(["screen_selection_score","robust_score"],ascending=False)
-    sm.to_csv(work/"v31_screen_scores.csv",index=False);sfam.to_csv(work/"v31_screen_family_matrix.csv",index=False)
+    sm.to_csv(work/"v31_screen_scores.csv",index=False)
+    sfam.to_csv(work/"v31_screen_family_matrix.csv",index=False)
     print(sm.head(12).to_string(index=False))
 
     finalists=sm.head(7).candidate.tolist()
     if "pure_soil" not in finalists:finalists.append("pure_soil")
-    finalists=list(dict.fromkeys(finalists))[:8];print("finalists",finalists)
+    finalists=list(dict.fromkeys(finalists))[:8]
+    print("finalists",finalists)
 
     heldout_seeds=[84001,84002,84003,84004,84005,84006,84007,84008]
     heldout_opps=["soil","adaptive","score3094","v16","ranker","melon","strict","findings"]
     print("Stage 2 held-out full meta")
-    hg=parallel(jobs_for(roots,agents,finalists,heldout_seeds,heldout_opps),worker,repo,args.workers)
-    hg.to_parquet(work/"v31_heldout_games.parquet",index=False)
-    hm,hfam=metrics(hg);hp=passive_cash(roots,finalists,worker,repo,work,args.workers);hm=hm.merge(hp,on="candidate",how="left")
+    heldout_path=work/"v31_heldout_games.parquet"
+    if heldout_path.exists():
+        print("Resuming: reusing", heldout_path)
+        hg=pd.read_parquet(heldout_path)
+    else:
+        hg=parallel(jobs_for(roots,agents,finalists,heldout_seeds,heldout_opps),
+                    worker,repo,args.workers)
+        hg.to_parquet(heldout_path,index=False)
+    hm,hfam=metrics(hg)
+    hp=passive_cash(roots,finalists,worker,repo,work,args.workers)
+    hm=hm.merge(hp,on="candidate",how="left")
+
     soil=hm[hm.candidate=="pure_soil"].iloc[0]
     hm["adaptive_gain"]=hm.adaptive_lineage_score-soil.adaptive_lineage_score
     hm["robust_delta"]=hm.robust_score-soil.robust_score
     hm["passive_ratio"]=hm.passive_cash/soil.passive_cash
     hm["selection_score"]=hm.robust_score+.20*hm.adaptive_gain
     hm=hm.sort_values(["selection_score","robust_score"],ascending=False)
-    hm.to_csv(work/"v31_heldout_scores.csv",index=False);hfam.to_csv(work/"v31_family_matrix.csv",index=False)
+    hm.to_csv(work/"v31_heldout_scores.csv",index=False)
+    hfam.to_csv(work/"v31_family_matrix.csv",index=False)
 
-    promoted=hm[(hm.candidate!="pure_soil")&(hm.invalid_games==0)&(hm.adaptive_gain>=.10)&(hm.robust_delta>=-.01)&(hm.passive_ratio>=.97)].copy()
+    promoted=hm[
+        (hm.candidate!="pure_soil") &
+        (hm.invalid_games==0) &
+        (hm.adaptive_gain>=.10) &
+        (hm.robust_delta>=-.01) &
+        (hm.passive_ratio>=.97)
+    ].copy()
+
     if len(promoted):
         best=promoted.sort_values(["selection_score","robust_score"],ascending=False).iloc[0]
         chosen=best.candidate
-        reason=f"Counter overlay promoted: adaptive-lineage gain {best.adaptive_gain:+.3f}, robust delta {best.robust_delta:+.3f}, passive ratio {best.passive_ratio:.3f}."
+        reason=(
+            f"Counter overlay promoted: adaptive-lineage gain {best.adaptive_gain:+.3f}, "
+            f"robust delta {best.robust_delta:+.3f}, passive ratio {best.passive_ratio:.3f}."
+        )
     else:
         chosen="pure_soil"
-        reason="No surgical market residual improved Adaptive/3094 by >=0.10 while keeping robust score within 0.01 of Soil and >=97% passive cash. Keep exact Soil."
+        reason=(
+            "No surgical market residual improved Adaptive/3094 by >=0.10 while keeping "
+            "robust score within 0.01 of Soil and >=97% passive cash. Keep exact Soil."
+        )
 
     out=work/"NEXT_SUBMIT_v31.tar.gz";package(roots[chosen],out)
     runner=hm[hm.candidate!=chosen].iloc[0].candidate if len(hm)>1 else None
     if runner:package(roots[runner],work/"RUNNER_UP_v31.tar.gz")
-    manifest={"version":1,"repo_commit":commit,"selected_candidate":chosen,"selection_reason":reason,
-              "selected_stats":hm[hm.candidate==chosen].iloc[0].to_dict(),"soil_reference":hm[hm.candidate=="pure_soil"].iloc[0].to_dict(),
-              "runner_up":runner,"screen_seeds":screen_seeds,"heldout_seeds":heldout_seeds,
-              "promotion_gate":{"min_adaptive_lineage_gain":.10,"min_robust_delta":-.01,"min_passive_ratio":.97,"invalid_games":0},
-              "next_submission":str(out)}
-    (work/"NEXT_SUBMIT_v31_manifest.json").write_text(json.dumps(manifest,indent=2,default=str))
-    print("\n=== V3.1 SELECTION ===");print(chosen);print(reason);print(out);print("\nHeld-out ranking");print(hm.to_string(index=False))
+
+    manifest={
+        "version":1,"repo_commit":commit,"selected_candidate":chosen,
+        "selection_reason":reason,
+        "selected_stats":hm[hm.candidate==chosen].iloc[0].to_dict(),
+        "soil_reference":hm[hm.candidate=="pure_soil"].iloc[0].to_dict(),
+        "runner_up":runner,
+        "screen_seeds":screen_seeds,"heldout_seeds":heldout_seeds,
+        "promotion_gate":{
+            "min_adaptive_lineage_gain":.10,"min_robust_delta":-.01,
+            "min_passive_ratio":.97,"invalid_games":0,
+        },
+        "next_submission":str(out),
+    }
+    (work/"NEXT_SUBMIT_v31_manifest.json").write_text(
+        json.dumps(manifest,indent=2,default=str)
+    )
+    print("\n=== V3.1 SELECTION ===")
+    print(chosen);print(reason);print(out);print("\nHeld-out ranking")
+    print(hm.to_string(index=False))
 
 
 if __name__=="__main__":

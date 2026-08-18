@@ -1,55 +1,60 @@
-# Research Notes: Episode Mining, Discord Signals, and V2 Design
+# Research Notes: Episode Mining, Public Frontier, and V3 Design
 
 ## Community signals worth taking seriously
 
 ### 1. “Treat the simulation like it’s open-loop”
-This is the highest-value clue in the Discord transcript, but it is a hypothesis rather than a law. If strong submissions exhibit low action entropy at the same day/hour across different opponents, the search problem collapses from a huge RL problem into a low-dimensional macro program. E002 measures this directly with `open_loop_score = 1 - normalized action entropy`.
 
-Practical consequence: first search farm composition, hiring schedule, land timing, sell reserves, and endgame timing. Only add reactive modeling where replay data shows it pays.
+This remains one of the highest-value clues, but it is now supported by stronger instrumentation than action entropy alone. The public corpus contains prefix stream hashes at turns 24, 100, 200, 400, and 719. These can measure whether a submission emits the same action prefix across different episodes without opening full replay payloads.
+
+Practical consequence: treat open-loopness as a measurable spectrum. Strong agents may use a nearly fixed opening and only become reactive later. Search macro composition, hiring schedule, land timing, sell reserves, and terminal timing first; add reactive logic only where the population evidence shows a payoff.
 
 ### 2. “Macros = taking actions out of a replay and running them”
-Exact action replay is useful as a diagnostic but unsafe as a submission strategy. Weeds, shop draws, market interactions, and small state divergences break exact movement sequences. E003 therefore performs **macro distillation**: infer day-indexed targets from replays, then let a state-aware deterministic controller satisfy those targets.
 
-### 3. CEM may fit this environment better than generic RL
-The Discord discussion independently points toward CEM because random variation is limited. That matches the structure of the problem. E005 optimizes a 18-dimensional macro vector rather than 720 low-level actions. The objective is both-seat pairwise win rate against a policy zoo.
+The public frontier confirms that replay/tape-derived action programs can be extremely strong. `Soil Remembers Rain` contains an outcome-blind modal route plus live weed repair and was the strongest robust reference in our controlled finalist panel.
 
-### 4. RL scores against the starter bot are not ladder evidence
-A reported 100k+ against starter only establishes economic competence. Ladder skill is based on wins/losses against other submissions. Every offline metric in this suite keeps this distinction explicit.
+This changes the earlier assumption that exact action replay is inherently too brittle. The correct distinction is:
 
-### 5. New submissions receive more games while uncertainty is high
-This is strategically useful for experiment scheduling. Do not resubmit byte-identical agents just to create noise, but use meaningful variants when the previous submission has accumulated enough episodes to diagnose it.
+- blind replay with no repair is fragile;
+- a high-quality open-loop route with small state-aware repairs can be frontier-grade.
 
-## Public notebook roles
+The V3 design therefore keeps exact/open-loop policies as first-class candidates and measures which reactive repairs actually help.
 
-The Kaggle web crawler currently exposes the notebook pages/titles but not their cell bodies in this environment, so the suite treats their public purposes as inspiration rather than pretending we reviewed inaccessible implementation details. For a cell-by-cell critique, pull/export the `.ipynb` files and add them to the project.
+### 3. CEM still fits the environment, but not before the execution frontier
 
-### `busyaprime/what-actually-wins-on-the-kaggriculture-ladder`
-High-value idea: analyze the *ladder population*, not only the game engine. E002 generalizes this into:
-- Bradley–Terry opponent-adjusted strength.
-- win/loss analysis instead of raw-coin optimization.
-- open-loopness by submission.
-- phase-specific farm signatures.
-- actor-grouped evaluation to reduce repeated-submission leakage.
+The earlier plan promoted CEM over a compact macro vector. That remains attractive, but Phase 2/V3 showed that the repository controller was far below the public deterministic/economic frontier. Optimizing a weak execution kernel is the wrong order of operations.
 
-### `llccqq624/kaggriculture-replay-data-miner`
-High-value idea: public replays are the competition’s behavioral dataset. E001 turns this into a reusable data factory with cached raw replays, turn-level Parquet, day-level macro Parquet, outcome labels, and future opponent-sale labels.
+Revised order:
 
-The key upgrade is to prioritize recent current-engine episodes and strong/diverse actors, rather than scrape an undifferentiated archive.
+1. match frontier execution and passive economy;
+2. build a family-balanced opponent zoo;
+3. search macro parameters with robust CEM;
+4. add small market/opponent residuals;
+5. only then evaluate larger learned controllers.
 
-### `devraai/episodes-data-analysis-and-linear-regression-mo`
-Linear regression is useful as an interpretable diagnostic, but final coins are a poor primary optimization target because:
-- the ladder only cares about win/loss/tie;
-- shared-market congestion creates nonlinear interaction effects;
-- opponent strength confounds raw final score;
-- repeated episodes from the same submission create leakage.
+### 4. RL scores against starter/passive bots are not ladder evidence
 
-E004 therefore uses regularized linear models where they are appropriate (future sell-volume forecasting) and logistic models for win diagnostics, with grouped validation. More complex CPU teachers can later be added and distilled into a tiny runtime model.
+A 100k+ passive score establishes economic competence, not ladder skill. The V3 experiments make this concrete: `pure_score3094` produced more passive cash than Soil but had a lower family-balanced robust score.
+
+### 5. New submissions should be information-dense
+
+Do not spray byte-identical or weakly motivated variants into the ladder. The preferred sequence is one offline-selected candidate, then a targeted contrast only after enough hosted episodes exist to diagnose the first submission.
+
+## Public data and executable-agent assets
+
+The project now uses three complementary public substrates:
+
+1. `episodes.csv`, `episode_features.csv`, `teams.csv`, and `daily_stats.csv` for population-level structure.
+2. `stream_hashes.csv` for exact/prefix behavioral-family and open-loop analysis.
+3. attached public `main.py` / `submission.tar.gz` artifacts for direct controlled tournaments.
+
+The 4.6 GB `replays.parquet` archive is now a microscope, not the census layer. Select strong/distinct actors first, then parse only targeted replays.
 
 ## Current-engine boundaries
 
-The research dataset must be tagged by engine era. In particular, the August 7, 2026 town rebalance changed town-center demand and shop unlocking, making pre-rebalance economy trajectories partially stale. The official engine source is always the source of truth.
+The research dataset must be tagged by engine era. The August 7, 2026 town rebalance changed town-center demand and shop unlocking, making pre-rebalance economy trajectories partly stale. Official engine source remains the source of truth.
 
 Hard invariants in the local mirror/tests include:
+
 - planting-day unwatered crop becomes a weed at end of day;
 - animal care bonus accumulates +1, not +2;
 - fertilizer is sellable;
@@ -59,32 +64,102 @@ Hard invariants in the local mirror/tests include:
 - hands disappear at end of day;
 - market processing is capped by order slots and uses lockstep per-unit execution.
 
-## V2 hierarchy
+## Phase 2 public frontier findings
 
-### Layer A — Replay Data Factory
-Raw episodes -> turn table -> daily macros -> current-engine filter.
+A public-agent zoo discovered 42 raw candidates and 38 exact-unique implementations. All 38 executed successfully in the local mirror.
 
-### Layer B — Strategy Miner
-Cluster trajectories into macro archetypes and estimate day-indexed target schedules.
+A Swiss stage followed by a both-seat finalist round robin identified the strongest robust public references. The most important finalist result was `Kaggriculture Frontier | The Soil Remembers Rain`, which scored 0.909 in the 44-game finalist round robin.
 
-### Layer C — Opponent Model
-At runtime infer a distribution over archetypes from only public state/history.
+Phase 2B then confirmed the public economic gap against the current GitHub controller and showed that several large, adaptive public agents share substantial source lineage. In particular, Adaptive Farming and Multi-Route were nearly identical by normalized token similarity, so public submission frequency cannot be treated as independent strategy evidence.
 
-### Layer D — Future Market Model
-Predict opponent sell volume over the next 24 turns. This is the first model promoted because market timing is reversible and lower-risk than farm restructuring.
+## V3 Frontier Transplant Lab
 
-### Layer E — Best-Response Search
-Use CEM over a compact policy vector. Evaluate against a zoo of fixed agents and replay-derived macro archetypes, both seats, many seeds.
+The V3 lab tested pure public references plus behavior-level transplants:
 
-### Layer F — Selective Controller
-Prediction never replaces mechanical safety. If confidence or expected advantage is low, fall back to the high-floor deterministic policy.
+- pure Soil, Adaptive, 3094, V16, Ranker, Melon, Strict Future, Findings;
+- Soil micro/farmer/hands with another policy's market actions;
+- reverse micro/market controls;
+- day-7/day-11 phase switches with both source policies shadow-called every turn.
+
+The meta was family-normalized so near-clone lineages did not receive duplicate weight.
+
+### V3 held-out result
+
+The promotion gate selected `pure_soil`.
+
+- robust score: 0.6590
+- mean family win rate: 0.8056
+- worst family: Adaptive/3094 at 0.375
+- passive cash: 171,985
+- runner-up: `pure_score3094`, robust 0.5806, passive cash 178,791
+- invalid games: 0
+
+Soil was 1.000 against Findings, V16/premium, Ranker/Melon, and Strict Future in the held-out family matrix. Broad transplants generally regressed, often because micro and market policies are tightly coupled to the physical/economic state created by their own route.
+
+Full result tables are stored under `experiments/v3_frontier_transplant/` and summarized in `docs/V3_FRONTIER_TRANSPLANT_RESULTS.md`.
+
+## V3.1 hypothesis: surgical market residuals
+
+The next experiment targets Soil's one clear weakness without changing its farmer/hand execution.
+
+`notebooks/14_v3_soil_route_counter_lab.ipynb` searches small public-state market residuals:
+
+- detect prior-turn increases in shared premium-product inventory;
+- treat those increases as candidate opponent sell/flood signals;
+- defer Soil's already-scheduled premium SELL under a configurable shock/price threshold;
+- release deferred quantity at the next safe scheduled sale;
+- disable deferral under shed pressure;
+- force terminal liquidation;
+- test premium SELL slot position.
+
+### Anti-overfit structure
+
+Stage 1 optimizes against Adaptive plus guardrail opponents, while 3094 is withheld. Stage 2 introduces 3094 as a held-out sibling of the target lineage and restores the full family-balanced meta.
+
+Promotion requires all of:
+
+1. Adaptive/3094 held-out win-rate gain >= +0.10 versus pure Soil.
+2. Global robust-score delta >= -0.01 versus pure Soil.
+3. Passive cash >= 97% of pure Soil.
+4. Zero invalid games.
+
+If no residual passes, pure Soil remains the correct next live calibration.
+
+## Revised architecture
+
+### Layer A - Population and executable frontier
+
+Public episode summaries + stream hashes + executable public agents.
+
+### Layer B - Frontier execution kernel
+
+Routing, task order, watering, weed repair, worker utilization, shed trips, and open-loop route integrity.
+
+### Layer C - Macro policy zoo
+
+Distinct economic schedules represented once per strategic family rather than once per public submission.
+
+### Layer D - Robust search
+
+CEM / parameter search against family-balanced opponents, both seats, held-out seeds, with passive-economy floors.
+
+### Layer E - Small adaptive residuals
+
+Market collision avoidance, future supply forecasting, opponent-family confidence, and other reversible decisions. These may alter only a narrow layer unless held-out evidence justifies deeper adaptation.
+
+### Layer F - Learned policies
+
+DQN/RL assets are research-only until their exact state/action contract is recovered and they beat deterministic frontier references in controlled population tests.
 
 ## Promotion criteria
 
 A new component is promoted only if it:
+
 1. passes engine-mechanics regression tests;
-2. improves both-seat tournament win rate on held-out seeds;
-3. survives at least one actor-grouped replay holdout when learned from data;
+2. improves or preserves both-seat held-out robustness on new seeds;
+3. survives family-normalized opponents rather than a clone-heavy raw population;
 4. does not materially increase invalid/no-op action rate;
 5. stays comfortably below the 1-second per-turn budget;
-6. wins against a **population** rather than only increasing passive-opponent cash.
+6. maintains a frontier-level passive economic floor;
+7. improves the targeted family if it is a counter-specific change;
+8. is evaluated on win/loss/tie, not cash score alone.

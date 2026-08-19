@@ -98,7 +98,13 @@ WHEAT at 4/12 turns and WOOL at 4/12/24 turns fail the current worst-family thre
 
 Nothing in this grammar is automatically enabled in the live agent.
 
-### 5. Distributional regret learner
+### 5. Deterministic counterfactual factory
+
+`kagv2.agentic.counterfactual` replays a deterministic matchup and changes exactly one selected decision while keeping seed, opponent, seat, and prior history fixed.
+
+The branch factory records runtime-visible state plus final relative-value changes. This turns a loss into a collection of causal training examples rather than a vague episode-level label.
+
+### 6. Distributional regret learner
 
 `kagv2.agentic.regret` learns:
 
@@ -115,9 +121,9 @@ The current Wave 18B dataset is not ready for deployment under the corrected val
 - q10/q90 coverage 0.69 / 0.625
 - no conservative gate with enough selected events has positive out-of-fold realized EV
 
-This is a critical result. The older seed+opponent grouping leaked seed regime information across folds and made the residual policy look much safer than it really was.
+This is a critical result. The older seed+opponent grouping leaked seed-regime information across folds and made the residual policy look much safer than it really was.
 
-### 6. Promotion contract
+### 7. Promotion contract
 
 `kagv2.agentic.promotion` requires all applicable gates to pass:
 
@@ -133,11 +139,67 @@ This is a critical result. The older seed+opponent grouping leaked seed regime i
 
 Missing hard/safe evidence is a rejection, not an implicit pass.
 
-### 7. Policy population
+### 8. Policy population
 
 `kagv2.agentic.population` reuses the existing zero-sum equilibrium solver. PSRO becomes useful only after strategically distinct specialists exist.
 
-Wave 19B FRONT_Q2 and FRONT_Q4 have effectively identical payoff profiles and both are slightly worse than V32, so there is currently nothing useful to mix.
+Wave 19B FRONT_Q2 and FRONT_Q4 have effectively identical payoff profiles and both are slightly worse than V32, so there is currently nothing useful to mix from that family.
+
+---
+
+# NeuroLoss as the first live ablation layer
+
+Wave 20 turns the agentic framework into a five-agent live experiment called **NeuroLoss-5**.
+
+The neuroscience terminology is computational inspiration, not biological equivalence. It gives us a useful decomposition for learning from failure:
+
+```text
+negative prediction error
+        |
+        v
+reverse replay
+        |
+        v
+episodic memory <----> slow statistical learning
+        |                       |
+        +-----------+-----------+
+                    v
+          state-dependent plasticity
+                    |
+                    v
+             Go / No-Go override
+                    |
+                    v
+                  V32
+```
+
+The five initial ablations are:
+
+```text
+N1 Dopamine
+    minimal causal reward-prediction-error correction
+
+N2 Hippocampus
+    episodic hard-regime memory retrieval
+
+N3 LC
+    whole-seed loss-risk controlled policy plasticity
+
+N4 CLS
+    episodic + generalized consensus before override
+
+N5 NeuroStack
+    regime + episodic + causal residual + FarmLedger context
+```
+
+These agents are intentionally different hypotheses rather than neighboring thresholds. Their live performance is useful even when they lose because each failure teaches us which learning mechanism deserves more causal data.
+
+See:
+
+- `docs/NEUROLOSS_STRATEGIES.md`
+- `experiments/neuroloss5/README.md`
+
+---
 
 ## Learning state machine
 
@@ -148,6 +210,8 @@ DISCOVER LOSS
   -> BRANCH COUNTERFACTUALS
   -> FIT DISTRIBUTIONAL RESIDUAL MODEL
   -> REJECT IF SEED-HELD-OUT POLICY EV <= 0
+  -> STORE RARE EXCEPTIONS EPISODICALLY
+  -> CONSOLIDATE REPEATED LESSONS SLOWLY
   -> DISTILL SMALL RESIDUAL
   -> HARD/SAFE/SEAT TEST
   -> BROAD GUARD TEST
@@ -161,7 +225,7 @@ DISCOVER LOSS
 
 ## Next data-generation wave
 
-The next counterfactual dataset should be generated on the fixed 19D hard, safe-control, and seat-asymmetry suites, not on a small arbitrary loss sample. It should record runtime-visible state at every branch and include at least 12 independent seeds per development/validation partition.
+The next counterfactual dataset should be generated on the fixed 19D hard, safe-control, and seat-asymmetry suites, not on a small arbitrary loss sample. It should record runtime-visible state at every branch and include many independent seeds in each development/validation partition.
 
 Priority intervention families:
 
@@ -172,3 +236,5 @@ Priority intervention families:
 5. premium sale timing only for forecast targets that pass leave-one-family-out reliability
 
 The objective is not to maximize average counterfactual delta. It is to discover a small residual policy whose seed-held-out, risk-adjusted realized value remains positive and whose gameplay effect survives hard-seed promotion.
+
+Longer term, strategically distinct survivors become response-oracle specialists in a population-level PSRO / double-oracle loop.

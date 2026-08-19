@@ -2,7 +2,7 @@
 
 Date: 2026-08-18
 
-This validation runs the new agentic analytics stack on actual Wave 18/19 send-back artifacts.
+This validation runs the new agentic analytics stack on actual Wave 18/19 send-back artifacts and validates the reusable counterfactual branch factory.
 
 ## Inputs
 
@@ -11,6 +11,12 @@ This validation runs the new agentic analytics stack on actual Wave 18/19 send-b
 - Wave 19B held-out candidate games: 384 games
 - Wave 19D seed-regime games: 640 games across 64 seeds
 - Wave 19D fixed hard/safe/seat seed suite
+
+## Software validation
+
+- local unit/integration tests: **9 passed**
+- end-to-end CLI run on all real artifacts: **PASS**
+- deterministic counterfactual branch factory: **PASS** with fresh agent instances, order fingerprints, bounded one-decision mutation, and runtime-visible state capture
 
 ## Regime model
 
@@ -91,6 +97,7 @@ The architecture itself passes sandbox validation. It correctly:
 2. filters opponent forecasts by unseen-family generalization;
 3. detects that the current regret dataset is underpowered and overoptimistic under weaker grouping;
 4. rejects both Wave 19B candidates;
-5. refuses promotion when hard/safe-suite evidence is absent.
+5. refuses promotion when hard/safe-suite evidence is absent;
+6. can now generate new deterministic one-decision counterfactual datasets from losses without notebook-specific mutation code.
 
 The next compute wave should focus on counterfactual data generation across many independent hard/safe seeds with full runtime-state features, not on another immediate live submission.

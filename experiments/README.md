@@ -1,28 +1,43 @@
-# Experiment Ledger
+# Experiments
 
-Create one directory or Markdown entry per promoted experiment. Record enough information to reproduce every ladder submission.
+This directory is the durable evidence chain for Kaggriculture research.
 
-Suggested fields:
+## Canonical files
+
+- [`EXPERIMENT_LEDGER.md`](EXPERIMENT_LEDGER.md) — chronological record of material experiments, including negative results and infrastructure failures.
+- [`EXPERIMENT_TEMPLATE.md`](EXPERIMENT_TEMPLATE.md) — required fields for every new experiment record.
+- `v3_frontier_transplant/` — retained historical experiment implementation.
+
+## Required discipline
+
+Every experiment that can influence a submission decision should record:
 
 ```text
-experiment_id:
-git_commit:
-engine_era:
-change:
-hypothesis:
-dev_seeds:
-holdout_seeds:
-opponent_population:
-both_seat_games:
-win_rate:
-mean_margin:
-latency_p95:
-regression_tests:
-model_metrics:
-submission_id:
-ladder_rating_history:
-replay_ids:
-decision: KEEP | REVERT | INVESTIGATE
+experiment_id
+status
+hypothesis
+exact control artifact / hash
+candidate change
+source branch / commit
+notebook or script
+input population
+seed sets
+both-seat protocol
+integrity checks
+activation count
+paired win delta
+paired margin delta
+worst-family result
+direct-champion result
+learned-model validation when applicable
+runtime checks
+decision
+next action
+live submission ID / rating history / replay IDs when applicable
 ```
 
-Do not overwrite old results when tuning. The objective is to turn the competition into an evidence chain rather than a sequence of leaderboard guesses.
+Do not overwrite historical results when tuning. Append a new experiment entry.
+
+An infrastructure failure is recorded as **INFRA INVALID**, not as evidence against the strategy hypothesis.
+
+The leaderboard is a confirmation environment, not a hyperparameter optimizer. Exact-byte clones, zero-activation wrappers, and candidates that failed offline promotion should not consume submission slots.

@@ -1,90 +1,166 @@
-# Project Status
+# Kaggriculture Project Status
 
-Last updated: 2026-08-17
+Last updated: 2026-08-18
 
-## Live ladder
+## Current control
 
-- V1 submission: accepted and initialized at rating 600.
-- Interpretation: 600 is the ladder starting point, not yet a performance verdict.
-- Next live calibration candidate: the V3-selected Soil reference, unless V3.1 finds a held-out Adaptive-lineage counter that passes its robustness gate.
-- Hosted evidence should be interpreted by win/loss/tie and opponent strength, not cash margin alone.
+**V32 Premium-First** remains the stable champion/control.
 
-## Current frontier evidence
+Exact runtime artifact:
 
-Phase 2A built an executable public-agent league from 38 exact-unique public submissions. A both-seat finalist round robin identified `Kaggriculture Frontier | The Soil Remembers Rain` as the strongest robust public reference in that panel.
+`SUBMIT_V32_RUNTIME_VERIFIED.tar.gz`
 
-Phase 2B then evaluated the frontier against the current GitHub simulator/controller and found a large deterministic/economic gap. The public frontier commonly produced roughly 145k-180k passive cash while the then-current repository agent was around the 80k range.
+SHA-256:
 
-The V3 Frontier Transplant Lab tested pure references, micro/market transplants, and day-7/day-11 phase transplants under a family-balanced held-out meta.
+`ad54a3f9bb94d3123997887da53e71ab69785d5d14ad0f53c51b7691e21d7811`
 
-### V3 held-out decision
+V32 is preserved by default. New strategies are expected to wrap it with sparse residual logic unless a replacement backbone independently proves superior.
 
-- Selected: `pure_soil`
-- Evaluated repo commit: `df23881cda684df7b8f078cb454d2253eda7202b`
-- Robust score: `0.6590`
-- Mean family win rate: `0.8056`
-- Worst family: Adaptive/3094 lineage at `0.375`
-- Passive cash: `171985`
-- Invalid games: `0`
-- Runner-up: `pure_score3094`, robust score `0.5806`, passive cash `178791`
+## Active research program
 
-Soil was 1.000 against Findings, V16/premium, Ranker/Melon, and Strict Future in the held-out family matrix. Its clear weakness was the Adaptive/3094 lineage. Broad transplants did not clear the promotion gate and several damaged robustness badly.
+The current program is **NeuroLoss**, a neuroscience-inspired loss-driven learning framework.
 
-Results are checked into:
+The project now treats a loss as the beginning of a causal investigation:
 
-- `docs/V3_FRONTIER_TRANSPLANT_RESULTS.md`
-- `experiments/v3_frontier_transplant/NEXT_SUBMIT_manifest.json`
-- `experiments/v3_frontier_transplant/v3_heldout_scores.csv`
-- `experiments/v3_frontier_transplant/v3_family_matrix.csv`
+```text
+loss
+ -> regime diagnosis
+ -> reverse replay
+ -> one-decision counterfactual branches
+ -> episodic / generalized learning
+ -> sparse residual
+ -> hard/safe/seat promotion gates
+ -> live confirmation
+ -> new losses
+```
 
-## V3.1 active experiment
+The neuroscience terminology is computational inspiration rather than a biological model.
 
-`notebooks/14_v3_soil_route_counter_lab.ipynb` and `scripts/soil_route_counter_lab.py` implement a surgical counter search.
+## Current live ablation family
 
-The experiment preserves Soil's exact farmer/hand route and tests only small market residuals:
+Five V32-derived experimental agents have been prepared:
 
-- prior-turn premium market inventory shock detection;
-- safe sell deferral;
-- product price guards;
-- premium sell slot ordering;
-- shed-pressure and terminal-liquidation safety.
+- **N1 Dopamine** — minimal causal reward-prediction-error residual.
+- **N2 Hippocampus** — episodic hard-regime memory rescue.
+- **N3 LC** — loss-risk-gated adaptive plasticity.
+- **N4 CLS** — episodic/generalized consensus before override.
+- **N5 NeuroStack** — integrated regime, episodic, causal, and FarmLedger context.
 
-Anti-overfit split:
+See:
 
-- Stage 1 searches against Adaptive and guardrail opponents.
-- 3094 is withheld until Stage 2.
-- Stage 2 restores the full family-balanced meta and uses new seeds.
+- `docs/NEUROLOSS_STRATEGIES.md`
+- `experiments/neuroloss5/README.md`
 
-Promotion requires:
+## Important established findings
 
-1. Adaptive/3094 held-out win-rate gain of at least `+0.10` versus Soil.
-2. Overall robust-score delta no worse than `-0.01` versus Soil.
-3. Passive cash at least 97% of Soil.
-4. Zero invalid games.
+### Regime risk is real
 
-If no residual passes, pure Soil remains the correct next live submission.
+A 640-game / 64-seed stress panel showed that visible exogenous regime features strongly predict V32 losses.
 
-## Current repository architecture
+The whole-seed grouped model reached approximately:
 
-- `baselines/v1/`: first submitted deterministic TournamentMind family.
-- `submission/`: V2 runtime with deterministic fallback, future-supply forecasting, archetype posterior, and confidence-gated meta selection.
-- `src/kagv2/equilibrium.py`: rectangular zero-sum meta solver + robust population mix.
-- `src/kagv2/reactions.py`: strength-weighted conditional-reaction mining around market shocks.
-- `src/kagv2/probes.py`: experimental threshold/market-probe analysis.
-- `src/kagv2/cem.py`: pure best-response CEM plus robust population CEM.
-- `scripts/soil_route_counter_lab.py`: current V3.1 frontier refinement search.
+- AUC: `0.921`
+- Brier: `0.094`
+- top-risk-quartile loss rate: `0.806`
+- lift: `2.46x`
 
-## Revised research queue
+This motivates state-dependent plasticity rather than global strategy replacement.
 
-1. Run V3.1 Soil Route Counter Lab.
-2. Submit only the automatically selected `NEXT_SUBMIT_v31.tar.gz`.
-3. If V3.1 falls back to Soil, use Soil as the live frontier calibration and mine its hosted failures.
-4. Quantify stream-hash open-loopness of current strong public submissions.
-5. Decode/characterize the Soil route and identify minimal state-aware repairs rather than broad policy splices.
-6. Build a family-normalized policy zoo so near-clone public lineages do not receive duplicate meta weight.
-7. After the deterministic frontier is matched, resume robust CEM over macro parameters and small adaptive market/opponent residuals.
-8. Keep DQN/RL assets research-only until their state/action contract and frontier performance are verified.
+### Opponent liquidation is predictable
 
-## Promotion rule
+FarmLedger leave-one-policy-family-out experiments showed strong generalization for several future-sale targets, with median linear AUC around `0.91` across the tested sale tasks.
 
-A new ladder submission is promoted only after controlled held-out evidence. Mean passive cash alone is insufficient. The candidate must survive both seats, new seeds, family-balanced opponents, runtime checks, invalid-action checks, and an explicit robustness gate. Targeted counter variants must additionally demonstrate improvement on the target family without materially regressing the frontier anchor.
+However, direct forecast-based front-running did not improve paired gameplay.
+
+Permanent lesson:
+
+> Forecasts are context for value estimation, not automatic action triggers.
+
+### Large counterfactual regrets exist, but are rare
+
+Some individual HIRE or seed-purchase suppressions changed final margin by thousands of dollars.
+
+But unconditional use of those interventions was harmful.
+
+Permanent lesson:
+
+> Learn the state gate, not the action rule.
+
+### Whole-seed validation is mandatory
+
+The first regret learner looked more reliable when grouping by seed + opponent. Correcting the split to hold out entire seeds revealed that the current branch dataset is underpowered at the independent-seed level.
+
+Permanent lesson:
+
+> AUC does not promote a policy. The induced out-of-seed policy must have positive realized value.
+
+## Agentic framework status
+
+Implemented under `src/kagv2/agentic/`:
+
+- regime-risk modeling
+- unseen-family forecast validation
+- known-hard / surprise loss queues
+- bounded intervention grammar
+- deterministic one-decision counterfactual factory
+- distributional regret learning
+- hard/safe/seat/direct-champion promotion contract
+- policy-population / PSRO reporting
+- end-to-end evolution orchestration
+
+Local CI covers the framework and the branch is maintained as a draft research PR until the new architecture has accumulated enough live evidence.
+
+## Next major offline experiment
+
+The next compute wave should generate a substantially larger counterfactual dataset across independent:
+
+- hard seeds
+- safe-control seeds
+- seat-asymmetry seeds
+- opponent families
+
+Priority decision families:
+
+- HIRE suppress / delay
+- strawberry-seed half / suppress
+- land timing
+- wheat procurement / reserve only in high-risk regimes
+- premium sale timing only when opponent forecasts pass unseen-family reliability gates
+
+The target is a distributional residual-value learner that can estimate not only expected gain, but downside and win-flip probability under strict whole-seed validation.
+
+## Long-term target
+
+The project is moving toward a population of strategically distinct specialists rather than a single endlessly complicated policy.
+
+Once genuine specialists exist, PSRO / double-oracle iteration can search for robust best responses against the evolving meta.
+
+The desired loop is:
+
+```text
+champion
+ -> learn from failures
+ -> create specialist
+ -> validate
+ -> add to population
+ -> solve robust response
+ -> confirm live
+ -> repeat
+```
+
+## Submission discipline
+
+The ladder is a confirmation environment, not the primary optimizer.
+
+Every future promoted submission should record:
+
+- exact artifact SHA-256
+- branch / commit
+- offline promotion evidence
+- hard/safe/seat results
+- live timestamp
+- rating trajectory
+- informative replay IDs
+- execution failures if any
+
+Negative results remain part of the project history because they constrain the next search direction.

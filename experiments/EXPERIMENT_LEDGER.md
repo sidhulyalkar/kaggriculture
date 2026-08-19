@@ -2,161 +2,238 @@
 
 Last updated: 2026-08-18
 
-This is the durable record of competition experiments. The goal is to preserve not only what won, but why each idea was tested, what evidence it produced, whether the experiment itself was valid, and what the result implies for the next research step.
+This is the canonical evidence chain for competition research. It records valid negative results, infrastructure failures, learned-model validation, promotion decisions, and the reason for each next experiment.
 
 ## Status vocabulary
 
-- **CHAMPION**: current live control; do not replace without promotion evidence.
-- **PROMOTED**: passed offline promotion and is eligible for a live confirmation.
-- **RESEARCH PASS**: mechanism is supported, but no submission is yet justified.
-- **REJECTED**: valid experiment; candidate did not clear its promotion gate.
-- **INFRA INVALID**: experiment did not measure the intended strategy because infrastructure failed.
-- **INCONCLUSIVE**: insufficient activation, sample size, or contradictory evidence.
+- **CHAMPION**: current control. Never replace without promotion evidence.
+- **PROMOTED**: passed offline promotion and is eligible for live confirmation.
+- **RESEARCH PASS**: mechanism is supported, but no live submission is justified yet.
+- **REJECTED**: experiment was valid and candidate failed promotion.
+- **INFRA INVALID**: experiment failed to measure the intended strategy.
+- **INCONCLUSIVE**: insufficient activation, independent groups, or confirmation evidence.
 
-## Current control
+## Current champion
 
-### V32 Premium-First / production anchor
+### V32 Premium-First
 
 - **Status:** CHAMPION
-- **Runtime artifact:** `SUBMIT_V32_RUNTIME_VERIFIED.tar.gz`
-- **Artifact SHA-256:** `ad54a3f9bb94d3123997887da53e71ab69785d5d14ad0f53c51b7691e21d7811`
-- **Offline evidence:** 40-agent held-out zoo; robust paired delta `+0.0255`; Soil delta `+0.3828`; zero invalid games.
-- **Live snapshot:** user-reported rating approximately `2030.5` and rank around `750` on 2026-08-18. Treat live rating as time-dependent rather than a stable model metric.
-- **Rule:** all future live candidates must either wrap this exact artifact or explicitly prove that replacing the backbone is superior.
+- **Artifact:** `SUBMIT_V32_RUNTIME_VERIFIED.tar.gz`
+- **SHA-256:** `ad54a3f9bb94d3123997887da53e71ab69785d5d14ad0f53c51b7691e21d7811`
+- **Historical offline evidence:** 40-agent held-out zoo, robust paired delta `+0.0255`, Soil delta `+0.3828`, zero invalid games.
+- **Policy rule:** future live candidates must wrap the exact V32 artifact or separately prove that replacing the backbone is superior.
 
 ---
 
-## Pre-Wave-18 lessons
+# Historical lessons
 
-### V33 supply-shock / opponent-switch experiment
+## V33 opponent-switch / supply-shock experiment
 
 - **Status:** REJECTED
-- **Classifier:** strong diagnostic result. On the 3094 holdout, recall `1.0` and false-positive rate `0` were observed.
-- **Strategy effect:** robust delta `-0.16468`; adaptive-lineage delta `-0.41667`; worst-family delta `0`; passive ratio `1.0`; zero invalid games.
-- **Interpretation:** opponent recognition can be accurate while a wholesale counter-policy is still economically wrong.
-- **Permanent lesson:** classification should gate small, causally supported residuals, not switch the entire farm plan.
+- Opponent identification itself was strong on the measured holdout, but the selected broad counter-policy was economically wrong.
+- Robust delta: `-0.16468`.
+- Adaptive-lineage delta: `-0.41667`.
+- Permanent lesson: classification can gate a sparse residual, but should not automatically switch the entire farm plan.
 
-### V34 market-timing lab
+## V34 market timing
 
-- **Status:** RESEARCH / not promoted
-- **Purpose:** test narrow market-timing interventions while preserving V32 mechanics.
-- **Disposition:** retained as a research branch; no live promotion was justified.
+- **Status:** RESEARCH ONLY
+- Narrow market-timing variants did not produce sufficient promotion evidence.
+- Permanent lesson: market timing is a secondary lever unless it is tied to a reliable causal state signal.
 
-### V35 market-microstructure probes
+## V35 market microstructure
 
-- **Status:** REJECTED as a live improvement; useful diagnostic.
-- **Candidates:** Shadow Priority, Slot Race, Front-Run Light.
-- **Key result:** V35A matched V32 exactly in all evaluated terminal outcomes across the screen and held-out set. V35B was also outcome-identical in its evaluated games, and V35C was outcome-identical in the screen.
-- **Interpretation:** changing source code is not evidence of a strategy change. Future experiments must record actual intervention activation counts and, where possible, action-trace hashes.
-- **Permanent lesson:** market microstructure can only be promoted if the residual measurably fires and produces paired outcome changes.
+- **Status:** REJECTED
+- Several source-level variants produced action/outcome behavior effectively identical to V32.
+- Permanent lesson: every experiment must count actual intervention activations and preferably hash action traces.
 
-### V36 production-frontier lab
+## V36 production frontier
 
 - **Status:** INFRA INVALID
-- **Original notebook decision:** `DO_NOT_SUBMIT_V36`.
-- **Root cause discovered after send-back inspection:** every non-V32 production candidate was invalid in the targeted screen because the isolated Python 3.12 loader executed a dynamically imported module without first registering it in `sys.modules`. `@dataclass` initialization then failed before gameplay.
-- **Interpretation:** V36 did **not** falsify the 12-hand, day-10 land, wheat-autarky, rolling-melon, or late-wheat hypotheses.
-- **Permanent loader rule:** for dynamic imports use `sys.modules[module_name] = module` before `spec.loader.exec_module(module)`.
+- Non-V32 candidates failed before gameplay because dynamically loaded modules were executed without being inserted into `sys.modules`, which broke dataclass initialization under Python 3.12.
+- Permanent loader invariant: register the module in `sys.modules` before `exec_module`.
+- V36 did **not** falsify its production hypotheses.
 
 ---
 
-# Wave 18: exact-anchor and learning diagnostics
+# Wave 18
 
 ## 18A Exact-Anchor Residual Tournament
 
 - **Status:** REJECTED
-- **Experiment validity:** exact no-op wrapper parity passed before candidate evaluation.
-- **Control:** exact V32 runtime artifact.
-- **Notable candidate results:**
-  - `HAND_CAP_12`, `LAND_DAY10`, and `HAND12_LAND10` produced zero action changes in the tested games and therefore supplied no evidence.
-  - `WHEAT_BUY_EMERGENCY`: robust delta about `-0.175`, direct V32 score `0.25`.
-  - `WHEAT_HOLD_3X`: robust delta about `-0.575`, Adaptive/Ranker delta about `-0.25`, direct V32 score `0.00`.
-  - `WHEAT_AUTARKY`: robust delta about `-0.475`.
-- **Decision:** no sparse unconditional residual survived the targeted screen.
-- **Interpretation:** broad wheat or capital overrides are too dangerous without a state-dependent gate.
+- No-op exact V32 parity passed.
+- Unconditional wheat/capital residuals were negative or inactive.
+- `WHEAT_BUY_EMERGENCY`: robust delta about `-0.175`, direct V32 score `0.25`.
+- `WHEAT_HOLD_3X`: robust delta about `-0.575`, target delta about `-0.25`, direct V32 score `0.00`.
+- Permanent lesson: broad residuals need state-dependent gates.
 
 ## 18B Single-Decision Counterfactual Surgeon
 
+- **Status:** RESEARCH PASS, underpowered for deployment
+- Baseline target games: `32`.
+- Baseline losses: `20`.
+- Activated branches: `600`.
+- Positive branches: `52 / 600`.
+- Loss-to-win flips: `0`.
+- Rare HIRE and strawberry-seed changes produced gains of several thousand dollars, including observations above `+$10k`, but their unconditional means were negative.
+- Initial conclusion: learn the state gate, not the intervention identity.
+
+## 18C Opponent Ledger + Forecast
+
 - **Status:** RESEARCH PASS
-- **Baseline target games:** `32` V32-vs-Target games.
-- **Baseline losses:** `20`.
-- **Counterfactual branches:** `600`, with `600` activated branches.
-- **Branches with positive final-margin delta:** `52 / 600`.
-- **Loss-to-win flips:** `0`.
-- **Stable but tiny pattern:** suppressing one wheat-seed purchase near step `262` was positive in `20 / 20` observed branches but only about `+$10` mean margin, too small for a live intervention.
-- **Large conditional effects:** individual HIRE or strawberry-seed suppressions occasionally improved final margin by several thousand dollars, including observed effects above `+$10k`, while their unconditional average remained negative.
-- **Interpretation:** high-value mistakes exist, but the action itself is not the rule. The research problem is to learn the state gate that separates rare large benefits from common large regressions.
-- **Next action:** train grouped, seed/opponent-held-out regret models for HIRE and strawberry-seed suppression only.
-
-## 18C Opponent Ledger + Forecast Lab
-
-- **Status:** RESEARCH PASS, highest-priority mechanism from Wave 18.
-- **Rows:** `60,396` turn-level observations.
-- **Trajectories:** `84` complete games.
-- **Opponent families:** `7`.
-- **Split:** held-out whole seeds; adjacent turns from a trajectory were never randomly split.
-- **Hidden-shed reconstruction:** mean R² approximately `0.933`.
-- **Representative hidden-state R²:** wheat `0.973`, strawberry `0.896`, milk `0.925`, wool `0.922`.
-- **Future-sale prediction:** mean 12-turn AUC approximately `0.995`; mean 24-turn AUC approximately `0.997`.
-- **Representative 12-turn sale AUC:** wheat `0.989`, strawberry `0.996`, melon `~1.000`, milk `0.998`, wool `0.992`.
-- **Caveat:** training and test contained the same policy families. Performance may partially reflect deterministic family/tape recognition.
-- **Interpretation:** the visible game state contains enough information to infer hidden opponent economics extremely well on new seeds. This is the strongest novel mechanism currently observed.
-- **Next action:** leave-one-policy-family-out validation, then convert prediction into a sparse exact-V32 market residual and measure causal gameplay value.
+- Rows: `60,396`.
+- Trajectories: `84`.
+- Families: `7`.
+- Held-out-seed mean hidden-shed R2: about `0.933`.
+- Mean 12-turn sale AUC: about `0.995`.
+- Mean 24-turn sale AUC: about `0.997`.
+- Permanent lesson: visible state contains powerful information about near-future opponent economic behavior.
 
 ## 18D Meta Counterexample Matrix
 
-- **Status:** RESEARCH PASS / seed-regime warning.
-- **Games:** `336` valid games in the public-agent matrix.
-- **V32:** target score `0.75`, target margin `+1,868.25`, guard score `1.00`, worst guard `1.00`, overall score `0.9167`, overall margin `+5,409.17` on this seed set.
-- **Soil:** target score `0.75`, target margin `+1,861.63`, overall score `0.8333`.
-- **Observation:** V32 and Soil daily trajectories were nearly identical across the traced target games; Soil differed mainly by about `-$11` terminal cash on days 28-29 in the observed comparison.
-- **Ranker:** target score `0.75` within the matrix but much weaker guard robustness.
-- **Important contradiction:** earlier Wave-18 slices showed V32 losing heavily to Adaptive/Ranker, while 18D showed V32 scoring `0.75` against both on different fresh seeds.
-- **Interpretation:** Adaptive/Ranker are not universally dominant against V32. Losses are strongly seed/regime dependent. Future promotion tests need a fixed hard-seed suite rather than relying on a small arbitrary fresh-seed sample.
-- **Next action:** map town-shop sequence, demand composition, weeds, seat, and early cash trajectory over a much larger seed panel and save the hardest regimes as a permanent stress suite.
+- **Status:** RESEARCH PASS / seed warning
+- On a small fresh seed slice, V32 scored `0.75` against the target set and `1.00` against the guards.
+- This contradicted earlier slices where Adaptive/Ranker dominated V32.
+- Permanent lesson: matchup estimates are highly seed/regime dependent. Small arbitrary seed panels are not promotion-quality evidence.
 
 ---
 
-# Wave 19 plan
+# Wave 19
 
 ## 19A FarmLedger leave-one-family-out
 
-- **Question:** does FarmLedger generalize to completely unseen policy families?
-- **Primary gates:** median unseen-family 4-turn sale AUC `>= 0.80`; median unseen-family 12-turn AUC `>= 0.85`; no systematic collapse to random across an entire held-out family.
-- **Status:** queued.
+- **Status:** RESEARCH PASS
+- Rows: `60,396`.
+- Families: `7`.
+- Median linear 4-turn sale AUC: `0.87020`.
+- Median linear 12-turn sale AUC: `0.90872`.
+- Median ExtraTrees 12-turn sale AUC: `0.99587`.
+- Worst held-family mean linear AUC: `0.88249`.
+- `ledger_generalizes = true`.
+- Strong runtime-compatible generalization is concentrated in MELON, MILK, and STRAWBERRY sales. Short-horizon WHEAT and WOOL are less universal.
+- Decision: opponent forecasts are valid **context**, but must still prove causal gameplay value.
 
 ## 19B Ledger front-run / market-MPC tournament
 
-- **Question:** can an embedded lightweight opponent-sale forecast improve actual paired gameplay while retaining exact V32 farming behavior?
-- **Candidate family:** tiny forecast-gated premium front-run quantities, forecast-aware ordering of already-planned sales, conservative hybrid.
-- **Submission authority:** yes, but only if parity, forecast, activation, held-out, guard, direct-V32, and runtime gates all pass.
-- **Status:** queued.
+- **Status:** REJECTED
+- Embedded linear forecast held-seed AUCs: Strawberry `0.8380`, Melon `0.9687`, Milk `0.8355`, Wool `0.7569`.
+- `FRONT_Q2_990`: 215 interventions, robust delta `-0.0078125`, target delta `0`, target margin delta `+7.5625`, direct V32 score `0.4375`, cash ratio `0.99990`.
+- `FRONT_Q4_990`: 149 interventions, robust delta `-0.0078125`, target delta `0`, target margin delta `+1.8125`, direct V32 score `0.4375`, cash ratio `0.99986`.
+- Decision: **DO NOT SUBMIT**.
+- Permanent lesson: predicting an opponent sale does not imply that front-running it is profitable.
 
-## 19C Regret-gated capital learner
+## 19D Seed-Regime Stress Lab
 
-- **Question:** can the rare high-value HIRE / strawberry-seed suppressions from 18B be predicted without triggering the common harmful cases?
-- **Validation:** grouped by seed/opponent; lightweight classifier + expected-margin model; fresh broad gameplay evaluation.
-- **Submission authority:** no. A passing candidate must survive a separate confirmation experiment first.
-- **Status:** queued.
-
-## 19D Seed-regime stress lab
-
-- **Question:** which exogenous regimes create V32 losses, and how reproducible is difficulty across opponents and seats?
-- **Output:** `hard_seed_suite.json` containing hard, safe-control, and seat-asymmetry seed sets.
-- **Permanent use:** future promotion notebooks should run both ordinary held-out seeds and this adversarial suite.
-- **Status:** queued.
+- **Status:** RESEARCH PASS, permanent infrastructure
+- Games: `640`.
+- Independent seeds: `64`.
+- Hard-game grouped prediction AUC in notebook: `0.91713`.
+- V32 target weakness over the large panel was confirmed:
+  - Adaptive seat 0 score `0.21875`.
+  - Adaptive seat 1 score `0.265625`.
+  - Ranker seat 0 score `0.21875`.
+  - Ranker seat 1 score `0.25`.
+- Guard performance remained very strong.
+- Output: fixed `hard_seeds`, `safe_control_seeds`, and `seat_asymmetry_seeds`.
+- Permanent rule: all future promotion runs must include the fixed stress suite and both seats.
 
 ---
 
-# Promotion invariants learned so far
+# Wave 20 sandbox validation: Loss-Driven Evolution Framework
 
-1. **Exact-anchor parity before residual research.** If a no-op wrapper does not hash to the same action trace and cash as V32, stop.
-2. **Register dynamic modules in `sys.modules` before execution.** Python 3.12 dataclass imports otherwise invalidate experiments.
-3. **Count actual intervention activations.** A source-code difference with zero activations is not evidence.
-4. **Both seats, paired same-seed comparisons.** Never compare unpaired aggregates when a paired control is available.
-5. **Separate development, held-out, confirmation, and hard-seed suites.** Do not tune against the final promotion set.
-6. **Learned components require group validation.** Hold out entire seeds and, where applicable, entire opponent families.
-7. **Optimize win probability and relative margin, not isolated farm cash.** Shared-market changes can help the opponent more than us.
-8. **Leaderboard slots are confirmation experiments.** Never submit exact-byte clones or candidates that failed offline promotion.
-9. **Preserve V32 by default.** Replace or override it only when a coherent subsystem has independently demonstrated positive causal value.
-10. **Every live submission must be reproducible.** Record artifact SHA-256, source commit/branch, exact promotion evidence, runtime gate, and live result.
+## Framework validation
+
+- **Status:** RESEARCH PASS as infrastructure
+- Unit/integration tests: `7 passed` in the sandbox.
+- Real-data inputs: Wave 18B, 19A, 19B, and 19D send-back artifacts.
+
+### Regime model
+
+Whole-seed grouped OOF on the 640-game 19D panel:
+
+- AUC: `0.92096`.
+- Brier: `0.09407`.
+- Base loss rate: `0.32813`.
+- Top-quartile predicted-risk loss rate: `0.80625`.
+- Lift: `2.457x`.
+
+**Decision:** PASS. Champion failure is strongly regime-predictable.
+
+### Forecast generalization filter
+
+Linear LOFO median sale AUC: `0.91248`.
+
+Default runtime-eligible targets require median AUC >= `0.85` and worst held-family AUC >= `0.80`.
+
+Eligible:
+
+- `sell4_MELON`, `sell4_MILK`, `sell4_STRAWBERRY`
+- `sell12_MELON`, `sell12_MILK`, `sell12_STRAWBERRY`
+- `sell24_MELON`, `sell24_MILK`, `sell24_STRAWBERRY`, `sell24_WHEAT`
+
+Rejected as universal signals:
+
+- short-horizon WHEAT
+- all tested WOOL horizons
+
+**Decision:** PASS as context only.
+
+### Regret learner under corrected validation
+
+A critical correction was discovered. Grouping by `seed + opponent` allowed the same seed regime to appear in different folds via another opponent. Validation is now by **whole seed only**.
+
+Under the corrected boundary:
+
+- branches: `600`.
+- independent loss seeds: only `5`.
+- benefit AUC: `0.89444`.
+- mean-delta MAE: about `$3,835.85`.
+- tree q10 coverage: `0.69`.
+- tree q90 coverage: `0.625`.
+- no conservative gate with at least 8 selected events has positive out-of-fold realized mean value.
+
+**Decision:** NOT READY FOR RUNTIME. The current regret dataset is underpowered at the independent-seed level.
+
+This supersedes the earlier optimistic interpretation of the 18B regret gate. Model AUC is not enough; the induced policy must have positive seed-held-out realized EV.
+
+### Promotion replay
+
+The new promotion contract independently rejects both Wave 19B candidates for negative robust delta, direct V32 score below `0.50`, and missing fixed hard/safe-suite evidence.
+
+**Decision:** keep V32 as champion.
+
+### Population / PSRO
+
+The Wave 19B front-run variants have essentially redundant payoff profiles and do not supply a useful specialist for a robust population mixture.
+
+**Decision:** do not randomize among near-clones. Generate strategically distinct specialists first.
+
+---
+
+# Wave 20 next experiment
+
+## Counterfactual Factory on fixed regimes
+
+- **Status:** NEXT
+- Generate a new counterfactual dataset on 19D hard, safe-control, and seat-asymmetry seeds.
+- Record complete runtime-visible state at each branch.
+- Use at least 12 independent seeds in each development/validation partition.
+- Prioritize HIRE, strawberry-seed, land timing, wheat procurement/reserve, and only forecast targets that pass LOFO reliability.
+- Evaluate all regret models by whole seed.
+- Require a positive conservative out-of-fold intervention policy before building a runtime residual.
+
+## Promotion sequence for any survivor
+
+1. exact V32 parity
+2. activation count
+3. ordinary fresh seeds
+4. fixed hard seeds
+5. fixed safe-control seeds
+6. seat-asymmetry suite
+7. broad guard zoo
+8. direct V32
+9. independent confirmation
+10. official Kaggle runtime before and after repacking
+11. live leaderboard confirmation
+
+The leaderboard remains a confirmation environment, never a training signal.

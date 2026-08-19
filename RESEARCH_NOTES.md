@@ -1,165 +1,190 @@
-# Research Notes: Episode Mining, Public Frontier, and V3 Design
+# Kaggriculture Research Notes
 
-## Community signals worth taking seriously
+Last updated: 2026-08-18
 
-### 1. “Treat the simulation like it’s open-loop”
+## Core competition framing
 
-This remains one of the highest-value clues, but it is now supported by stronger instrumentation than action entropy alone. The public corpus contains prefix stream hashes at turns 24, 100, 200, 400, and 719. These can measure whether a submission emits the same action prefix across different episodes without opening full replay payloads.
+Kaggriculture is a 720-turn, two-player farming economy in which both agents interact with the same market. The best agent is therefore not simply the farm that produces the most gross value in isolation. It is the policy that converts production into final bank cash more reliably than a changing opponent population.
 
-Practical consequence: treat open-loopness as a measurable spectrum. Strong agents may use a nearly fixed opening and only become reactive later. Search macro composition, hiring schedule, land timing, sell reserves, and terminal timing first; add reactive logic only where the population evidence shows a payoff.
+The research program has converged on a layered architecture:
 
-### 2. “Macros = taking actions out of a replay and running them”
+```text
+deterministic mechanics
++
+strong validated champion route
++
+opponent / regime inference
++
+sparse counterfactual residuals
++
+robust promotion gates
+```
 
-The public frontier confirms that replay/tape-derived action programs can be extremely strong. `Soil Remembers Rain` contains an outcome-blind modal route plus live weed repair and was the strongest robust reference in our controlled finalist panel.
+The current champion/control is V32.
 
-This changes the earlier assumption that exact action replay is inherently too brittle. The correct distinction is:
+## Major strategic shift
 
-- blind replay with no repair is fragile;
-- a high-quality open-loop route with small state-aware repairs can be frontier-grade.
+The main research question has shifted from:
 
-The V3 design therefore keeps exact/open-loop policies as first-class candidates and measures which reactive repairs actually help.
+> What globally better farm schedule should replace the current controller?
 
-### 3. CEM still fits the environment, but not before the execution frontier
+into:
 
-The earlier plan promoted CEM over a compact macro vector. That remains attractive, but Phase 2/V3 showed that the repository controller was far below the public deterministic/economic frontier. Optimizing a weak execution kernel is the wrong order of operations.
+> When and why does the current champion lose, and can those losses teach us a small state-dependent correction that transfers to new seeds?
 
-Revised order:
+This is the foundation of the NeuroLoss program.
 
-1. match frontier execution and passive economy;
-2. build a family-balanced opponent zoo;
-3. search macro parameters with robust CEM;
-4. add small market/opponent residuals;
-5. only then evaluate larger learned controllers.
+## Loss-driven learning thesis
 
-### 4. RL scores against starter/passive bots are not ladder evidence
+A loss should produce four kinds of information:
 
-A 100k+ passive score establishes economic competence, not ladder skill. The V3 experiments make this concrete: `pure_score3094` produced more passive cash than Soil but had a lower family-balanced robust score.
+1. **prediction error** — was the outcome more surprising than expected?
+2. **causal regret** — which earlier decisions would actually have changed the final relative margin?
+3. **recurrence** — is this state likely to happen again?
+4. **confidence** — how many independent seeds support the same lesson?
 
-### 5. New submissions should be information-dense
+The priority of a learning event can be thought of as:
 
-Do not spray byte-identical or weakly motivated variants into the ladder. The preferred sequence is one offline-selected candidate, then a targeted contrast only after enough hosted episodes exist to diagnose the first submission.
+```text
+priority
+  = recurrence
+  × expected policy gain
+  × surprise
+  × confidence
+```
 
-## Public data and executable-agent assets
+This prevents the research loop from overreacting to spectacular but one-off branches.
 
-The project now uses three complementary public substrates:
+## Neuroscience-inspired decomposition
 
-1. `episodes.csv`, `episode_features.csv`, `teams.csv`, and `daily_stats.csv` for population-level structure.
-2. `stream_hashes.csv` for exact/prefix behavioral-family and open-loop analysis.
-3. attached public `main.py` / `submission.tar.gz` artifacts for direct controlled tournaments.
+The neuroscience terminology is used as a computational analogy:
 
-The 4.6 GB `replays.parquet` archive is now a microscope, not the census layer. Select strong/distinct actors first, then parse only targeted replays.
+- **Dopamine / RPE** — unexpected negative outcomes create a teaching signal.
+- **Hippocampus** — preserve rare but important episodes and retrieve similar failure states.
+- **LC / adaptive plasticity** — alter willingness to deviate based on predicted baseline failure risk.
+- **CLS** — combine fast episodic memory with slow population-level generalization.
+- **Go / No-Go** — model upside and downside separately rather than relying on a single mean-value estimate.
 
-## Current-engine boundaries
+The resulting live ablation family contains N1 Dopamine, N2 Hippocampus, N3 LC, N4 CLS, and N5 NeuroStack.
 
-The research dataset must be tagged by engine era. The August 7, 2026 town rebalance changed town-center demand and shop unlocking, making pre-rebalance economy trajectories partly stale. Official engine source remains the source of truth.
+## Key experimental findings
 
-Hard invariants in the local mirror/tests include:
+### Unconditional residuals are dangerous
 
-- planting-day unwatered crop becomes a weed at end of day;
-- animal care bonus accumulates +1, not +2;
-- fertilizer is sellable;
-- occupied animal structures cannot be dug up;
-- movement through locked tiles is allowed;
-- shed access is the four center-adjacent cells;
-- hands disappear at end of day;
-- market processing is capped by order slots and uses lockstep per-unit execution.
+Broad wheat, hiring, land, and market overrides frequently either failed to activate or reduced broad performance. This does not imply that the underlying action is always wrong. It implies that the correct research target is the state gate.
 
-## Phase 2 public frontier findings
+### Counterfactual branches show large local effects
 
-A public-agent zoo discovered 42 raw candidates and 38 exact-unique implementations. All 38 executed successfully in the local mirror.
+Individual one-decision branches occasionally improve final margin by several thousand dollars. Yet the same mutation can have strongly negative average value.
 
-A Swiss stage followed by a both-seat finalist round robin identified the strongest robust public references. The most important finalist result was `Kaggriculture Frontier | The Soil Remembers Rain`, which scored 0.909 in the 44-game finalist round robin.
+Conclusion: learn the conditional value of a departure from V32 rather than the global desirability of an action.
 
-Phase 2B then confirmed the public economic gap against the current GitHub controller and showed that several large, adaptive public agents share substantial source lineage. In particular, Adaptive Farming and Multi-Route were nearly identical by normalized token similarity, so public submission frequency cannot be treated as independent strategy evidence.
+### FarmLedger generalizes
 
-## V3 Frontier Transplant Lab
+Near-term opponent selling remains predictable even when holding out an entire opponent policy family. This supports the idea that public game state contains transferable economic information rather than only policy-identity signatures.
 
-The V3 lab tested pure public references plus behavior-level transplants:
+### Prediction does not imply exploitation
 
-- pure Soil, Adaptive, 3094, V16, Ranker, Melon, Strict Future, Findings;
-- Soil micro/farmer/hands with another policy's market actions;
-- reverse micro/market controls;
-- day-7/day-11 phase switches with both source policies shadow-called every turn.
+Forecast-gated premium front-running failed to improve fresh paired gameplay despite strong opponent-sale prediction.
 
-The meta was family-normalized so near-clone lineages did not receive duplicate weight.
+Conclusion: an opponent forecast should be an input into counterfactual action valuation, not a reflexive market command.
 
-### V3 held-out result
+### Hard regimes are predictable
 
-The promotion gate selected `pure_soil`.
+The 64-seed stress experiment showed that town/seed/early-state features strongly predict when V32 fails. Whole-seed grouped OOF AUC is around 0.921.
 
-- robust score: 0.6590
-- mean family win rate: 0.8056
-- worst family: Adaptive/3094 at 0.375
-- passive cash: 171,985
-- runner-up: `pure_score3094`, robust 0.5806, passive cash 178,791
-- invalid games: 0
+Conclusion: the agent should be conservative in regimes where V32 is likely to win and more exploratory only where the baseline is already vulnerable.
 
-Soil was 1.000 against Findings, V16/premium, Ranker/Melon, and Strict Future in the held-out family matrix. Broad transplants generally regressed, often because micro and market policies are tightly coupled to the physical/economic state created by their own route.
+### Whole-seed validation matters
 
-Full result tables are stored under `experiments/v3_frontier_transplant/` and summarized in `docs/V3_FRONTIER_TRANSPLANT_RESULTS.md`.
+The regret learner initially looked safer under seed+opponent grouping. Holding out entire seeds exposed much larger uncertainty.
 
-## V3.1 hypothesis: surgical market residuals
+Conclusion: never let one seed appear in both train and validation through different opponent families when learning strategic residual value.
 
-The next experiment targets Soil's one clear weakness without changing its farmer/hand execution.
+## Current live experiment
 
-`notebooks/14_v3_soil_route_counter_lab.ipynb` searches small public-state market residuals:
+NeuroLoss-5 is a five-agent mechanistic ablation family built from the exact V32 runtime artifact.
 
-- detect prior-turn increases in shared premium-product inventory;
-- treat those increases as candidate opponent sell/flood signals;
-- defer Soil's already-scheduled premium SELL under a configurable shock/price threshold;
-- release deferred quantity at the next safe scheduled sale;
-- disable deferral under shed pressure;
-- force terminal liquidation;
-- test premium SELL slot position.
+The first live comparison is designed around:
 
-### Anti-overfit structure
+```text
+N1 minimal causal correction
+N3 adaptive regime plasticity
+N5 integrated stack
+```
 
-Stage 1 optimizes against Adaptive plus guardrail opponents, while 3094 is withheld. Stage 2 introduces 3094 as a held-out sibling of the target lineage and restores the full family-balanced meta.
+followed by:
 
-Promotion requires all of:
+```text
+N2 episodic retrieval
+N4 fast/slow consensus
+```
 
-1. Adaptive/3094 held-out win-rate gain >= +0.10 versus pure Soil.
-2. Global robust-score delta >= -0.01 versus pure Soil.
-3. Passive cash >= 97% of pure Soil.
-4. Zero invalid games.
+Each hosted loss should be treated as a future reverse-replay candidate rather than just a rating decrement.
 
-If no residual passes, pure Soil remains the correct next live calibration.
+## What to collect from live episodes
 
-## Revised architecture
+Where possible preserve:
 
-### Layer A - Population and executable frontier
+- submission SHA
+- opponent
+- seat
+- replay ID
+- final reward
+- rating before/after
+- whether a residual activated
+- regime-risk trace
+- opponent forecast trace
+- whether the loss was predicted-hard or surprising
 
-Public episode summaries + stream hashes + executable public agents.
+The most valuable new data is not necessarily the worst loss. Surprise losses are especially important because they reveal holes in the current regime model.
 
-### Layer B - Frontier execution kernel
+## Next offline target
 
-Routing, task order, watering, weed repair, worker utilization, shed trips, and open-loop route integrity.
+The next major CPU wave should generate a much larger causal branch dataset across many independent seeds.
 
-### Layer C - Macro policy zoo
+Priority mutations:
 
-Distinct economic schedules represented once per strategic family rather than once per public submission.
+- HIRE suppress/delay
+- strawberry-seed half/suppress
+- land timing
+- wheat procurement/reserve in high-risk regimes
+- premium sale timing only when the underlying forecast generalizes to held-out families
 
-### Layer D - Robust search
+The learned output should estimate a distribution, not just a mean:
 
-CEM / parameter search against family-balanced opponents, both seats, held-out seeds, with passive-economy floors.
+```text
+P(DeltaMargin > 0)
+E[DeltaMargin]
+Q10(DeltaMargin)
+P(loss -> win)
+```
 
-### Layer E - Small adaptive residuals
+Runtime intervention should be allowed only when the induced policy itself has positive whole-seed held-out value.
 
-Market collision avoidance, future supply forecasting, opponent-family confidence, and other reversible decisions. These may alter only a narrow layer unless held-out evidence justifies deeper adaptation.
+## Population-level direction
 
-### Layer F - Learned policies
+Once multiple specialists demonstrate distinct payoff profiles, use the existing equilibrium / PSRO machinery to move beyond a single monolithic policy.
 
-DQN/RL assets are research-only until their exact state/action contract is recovered and they beat deterministic frontier references in controlled population tests.
+Desired population examples:
 
-## Promotion criteria
+- V32 stable control
+- hard-regime capital specialist
+- feed/wheat-deficit specialist
+- early-expansion specialist
+- anti-premium-liquidation specialist
+- terminal-control specialist
 
-A new component is promoted only if it:
+A useful population is one whose members cover different failure modes. Five versions of the same residual threshold are not strategic diversity.
 
-1. passes engine-mechanics regression tests;
-2. improves or preserves both-seat held-out robustness on new seeds;
-3. survives family-normalized opponents rather than a clone-heavy raw population;
-4. does not materially increase invalid/no-op action rate;
-5. stays comfortably below the 1-second per-turn budget;
-6. maintains a frontier-level passive economic floor;
-7. improves the targeted family if it is a counter-specific change;
-8. is evaluated on win/loss/tie, not cash score alone.
+## Research discipline
+
+- preserve exact champion hashes;
+- record infrastructure failures separately from strategy failures;
+- require both-seat paired evaluation;
+- use whole-seed splits;
+- use family holdout for opponent models;
+- retain hard/safe/seat suites;
+- promote policies, not predictive metrics;
+- keep negative findings in the experiment ledger;
+- treat the ladder as confirmation rather than optimization.

@@ -157,3 +157,54 @@ def test_loop_emits_manifest(tmp_path):
     assert manifest["regime"]["auc"] > 0.8
     assert manifest["regret"]["auc_benefit"] > 0.7
     assert (tmp_path / "EVOLUTION_MANIFEST.json").exists()
+
+
+def test_counterfactual_factory_replays_single_market_mutation():
+    from kagv2.agentic.counterfactual import BranchSpec, apply_branch, economic_branch_specs
+    action = {"farmer": ["PASS"], "hands": [], "market": [["BUY_SEED", "STRAWBERRY", 8], ["HIRE"]]}
+    specs = economic_branch_specs(action, step=120)
+    assert any(s.op == "BUY_SEED" and s.mutation == "half" for s in specs)
+    spec = BranchSpec(step=120, market_index=0, mutation="half", op="BUY_SEED", item="STRAWBERRY", qty=8)
+    changed, pending, hit = apply_branch(action, spec)
+    assert hit and pending is None
+    assert changed["market"][0] == ["BUY_SEED", "STRAWBERRY", 4]
+    assert action["market"][0][2] == 8
+
+
+def test_counterfactual_factory_can_generate_rows_with_fresh_agents():
+    from kagv2.agentic.counterfactual import build_counterfactual_rows
+
+    class FakeGame:
+        episode_steps = 2
+        def __init__(self, seed):
+            self.step = 0
+            self.farms = [
+                {"money": 3000.0, "hands": [], "unlocked_quadrants": ["NW"], "tiles": []},
+                {"money": 3000.0, "hands": [], "unlocked_quadrants": ["NW"], "tiles": []},
+            ]
+        def obs(self, p):
+            return {
+                "player": p, "step": self.step, "day": 0, "hour": self.step,
+                "farms": self.farms,
+                "private": {"shed": {}},
+                "market": {"inventory": {}, "prices": {}},
+                "town": {"unlocked_shops": []},
+            }
+        def step_once(self, actions):
+            self.step += 1
+
+    def champion_factory():
+        def agent(obs):
+            return {"farmer": ["PASS"], "hands": [], "market": [["BUY_SEED", "WHEAT", 2]]}
+        return agent
+
+    def opponent_factory():
+        return lambda obs: {"farmer": ["PASS"], "hands": [], "market": []}
+
+    rows = build_counterfactual_rows(
+        champion_factory, opponent_factory, seed=3, seat=0, max_events=2,
+        game_factory=FakeGame,
+    )
+    assert rows
+    assert all(r["activated"] == 1 for r in rows)
+    assert {r["mutation"] for r in rows} == {"half", "suppress"}

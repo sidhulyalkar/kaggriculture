@@ -6,7 +6,10 @@ This directory is the durable evidence chain for Kaggriculture research.
 
 - [`EXPERIMENT_LEDGER.md`](EXPERIMENT_LEDGER.md) — chronological record of material experiments, including negative results and infrastructure failures.
 - [`EXPERIMENT_TEMPLATE.md`](EXPERIMENT_TEMPLATE.md) — required fields for every new experiment record.
+- [`wave20/`](wave20/) — sandbox-validated loss-driven evolution framework, permanent hard-seed suite, and real-data validation report.
 - `v3_frontier_transplant/` — retained historical experiment implementation.
+
+The current learning architecture is documented in [`docs/AGENTIC_EVOLUTION_FRAMEWORK.md`](../docs/AGENTIC_EVOLUTION_FRAMEWORK.md).
 
 ## Required discipline
 

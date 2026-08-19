@@ -6,91 +6,88 @@ This document defines how the project should allocate compute, choose experiment
 
 ## Objective
 
-Build an agent that wins by combining a strong production backbone with sparse, learned, opponent-aware residual decisions. The project should not chase leaderboard noise or repeatedly clone public tapes.
+Build an agent that wins by combining a strong production backbone with sparse, learned, opponent-aware residual decisions.
 
 The current control is V32. Until evidence says otherwise, V32 is treated as a high-value invariant rather than a disposable baseline.
 
-## Current strategic thesis
+## Strategic thesis
 
 The public field has converged on strong 30-day production programs, replay/tape backbones, stable routing, and modest market corrections. Our durable edge should come from capabilities that static tapes do not have:
 
-1. reconstruct hidden opponent economic state from public observations;
-2. forecast near-term opponent supply and liquidity decisions;
+1. infer when the current champion is entering a historically dangerous seed/town regime;
+2. forecast near-term opponent economic behavior from public state;
 3. branch counterfactually from exact V32 decisions and learn state-dependent regret;
-4. identify exogenous seed/town regimes where V32 becomes vulnerable;
-5. apply only sparse, confidence-gated residuals unless a replacement backbone proves itself independently.
+4. preserve rare high-value exceptions episodically without immediately rewriting the global policy;
+5. consolidate repeated lessons slowly across independent seeds;
+6. apply only sparse, uncertainty-aware residuals unless a replacement backbone independently proves itself;
+7. evolve a population of strategically distinct specialists and solve for robust responses.
 
-## Research stack
+The active implementation of this thesis is the **NeuroLoss** program.
+
+## Current research stack
 
 ```text
-                 LIVE LADDER
-                     ^
-                     |
-        runtime-verified promoted agent
-                     ^
-                     |
-          independent confirmation
-                     ^
-                     |
-     ordinary held-out + hard-seed suite
-                     ^
-                     |
-      causal residual / learned subsystem
-                     ^
-                     |
-              exact V32 anchor
+                   LIVE LADDER
+                       ^
+                       |
+             live experimental probes
+                       ^
+                       |
+            runtime-safe sparse residuals
+                       ^
+                       |
+             exact V32 champion anchor
 
-Offline intelligence layers:
+Offline learning loop:
 
-public agents + replay population
-            |
-            +--> FarmLedger hidden-state estimator
-            +--> opponent 4/12/24-turn supply forecast
-            +--> counterfactual regret database
-            +--> seed-regime difficulty model
+losses
+  |
+  +--> regime-risk model
+  +--> FarmLedger opponent forecast
+  +--> known-hard / surprise queue
+  +--> counterfactual branch factory
+  +--> episodic memory
+  +--> distributional regret learner
+  +--> hard/safe/seat promotion
+  +--> specialist population / PSRO
 ```
 
-## Wave-19 lanes
+## Why neuroscience-inspired organization?
 
-### Lane A — generalization science
+The neuroscience labels provide a useful decomposition of the learning problem:
 
-Notebook: `19A_ledger_leave_one_family_out.ipynb`
+- **Dopamine / RPE:** unexpected loss creates a teaching signal.
+- **Hippocampus:** retain rare but important episodes and retrieve similar failure states.
+- **LC:** modulate plasticity based on predicted baseline failure risk.
+- **CLS:** combine fast episodic learning with slow statistical consolidation.
+- **Go / No-Go:** separately value upside and downside before allowing an override.
 
-Purpose: verify whether the Wave-18C FarmLedger result survives complete opponent-family holdout.
+The analogy is computational, not biological.
 
-Success means the estimator is learning transferable game structure rather than merely memorizing public deterministic routes.
+## NeuroLoss-5 live ablation family
 
-### Lane B — immediate submission research
+The first five agents are deliberately different hypotheses:
 
-Notebook: `19B_ledger_front_run_mpc_tournament.ipynb`
+```text
+N1 Dopamine
+    minimal causal correction
 
-Purpose: turn opponent-sale forecasting into a tiny market residual around exact V32.
+N2 Hippocampus
+    episodic memory rescue
 
-Only this lane may mint a Wave-19 live tar without another notebook. Promotion requires:
+N3 LC
+    regime-risk adaptive plasticity
 
-- exact V32 wrapper parity;
-- learned forecast held-seed quality;
-- nonzero residual activation;
-- positive fresh paired robust delta;
-- bounded worst guard regression;
-- non-negative direct V32 head-to-head;
-- successful official Kaggle loader/full-episode runtime before and after packing.
+N4 CLS
+    episodic + generalized consensus
 
-### Lane C — counterfactual advantage learning
+N5 NeuroStack
+    integrated regime + episodic + FarmLedger arbitration
+```
 
-Notebook: `19C_regret_gated_capital_learner.ipynb`
+This lets every live result answer a research question rather than simply producing another rating.
 
-Purpose: learn when suppressing a HIRE or strawberry-seed purchase has positive final-game value.
-
-This lane cannot directly submit. A positive result creates a frozen candidate that must survive an independent confirmation notebook.
-
-### Lane D — adversarial validation infrastructure
-
-Notebook: `19D_seed_regime_stress_lab.ipynb`
-
-Purpose: explain the large seed-to-seed variability seen in V32 vs Adaptive/Ranker and create a permanent hard-seed stress suite.
-
-The hard suite should become part of every future promotion protocol.
+See `experiments/neuroloss5/README.md`.
 
 ## Promotion pipeline
 
@@ -108,16 +105,25 @@ Failure here means **INFRA INVALID**, not strategy rejection.
 
 ### Gate 1: mechanism evidence
 
-A subsystem must show the mechanism exists.
+A subsystem must show that its mechanism exists.
 
 Examples:
 
-- forecast model: group-held-out AUC/R²;
-- regret model: grouped out-of-fold discrimination/calibration;
-- scheduler: lower idle/travel without FEED/CARE regressions;
-- market residual: actual order changes and local predicted economic advantage.
+- regime model: whole-seed group-held-out AUC + calibration;
+- opponent forecast: leave-one-policy-family-out AUC;
+- regret model: whole-seed OOF discrimination and value calibration;
+- episodic retrieval: support from multiple independent matching episodes;
+- market residual: actual order changes and local economic advantage.
 
-### Gate 2: paired gameplay screen
+### Gate 2: policy-level out-of-fold value
+
+A predictive model cannot promote itself.
+
+The policy induced by the learned gate must have positive realized out-of-fold value under whole-seed validation.
+
+This gate was added after a regret model retained strong classification AUC while failing to produce a conservative positive-EV action policy.
+
+### Gate 3: paired gameplay screen
 
 Use same seed, both seats, exact control.
 
@@ -128,7 +134,7 @@ Kill candidates that:
 - materially reduce target or robust performance;
 - reduce aggregate cash dramatically even if a small win-rate sample is lucky.
 
-### Gate 3: broad fresh holdout
+### Gate 4: broad fresh holdout
 
 Use fresh seeds and every available opponent family.
 
@@ -143,26 +149,26 @@ Secondary metrics:
 - own cash ratio;
 - per-turn latency.
 
-### Gate 4: adversarial hard-seed suite
+### Gate 5: adversarial seed suites
 
-Once 19D exists, every candidate must be tested on:
+Every candidate should be tested on:
 
 - hard seeds;
 - safe-control seeds;
 - seat-asymmetry seeds;
 - both seats.
 
-This is specifically intended to prevent a candidate from looking strong only because its ordinary fresh seed sample was easy.
+A strong residual should improve losing regimes without damaging states where V32 is already reliable.
 
-### Gate 5: independent confirmation
+### Gate 6: independent confirmation
 
 Freeze code and thresholds before this gate.
 
 Use unseen seeds. Do not retune after reading the result. A failure sends the mechanism back to research rather than prompting threshold surgery on the confirmation set.
 
-### Gate 6: runtime contract
+### Gate 7: runtime contract
 
-Exact archive must pass:
+Exact archive should pass:
 
 1. official last-callable loader;
 2. full Kaggriculture episode;
@@ -172,9 +178,9 @@ Exact archive must pass:
 6. full episode again;
 7. SHA-256 recorded.
 
-### Gate 7: live ladder
+### Gate 8: live ladder
 
-The live ladder confirms offline evidence. It is not the optimizer.
+The live ladder confirms offline evidence and supplies new failure cases. It is not the optimizer.
 
 For every official submission record:
 
@@ -188,59 +194,97 @@ For every official submission record:
 
 ## Compute allocation
 
-When multiple Kaggle CPU notebooks can run simultaneously, prefer orthogonal lanes:
+When multiple CPU notebooks can run simultaneously, prefer orthogonal lanes:
 
-- 25% submission-candidate tournament;
-- 25% opponent modeling/generalization;
-- 25% counterfactual regret mining;
-- 25% adversarial seed/meta mapping.
+- 30% counterfactual data generation on independent seeds;
+- 20% regime / surprise modeling;
+- 20% opponent forecasting and hidden-state inference;
+- 20% residual value learning + calibration;
+- 10% policy-population / adversarial evaluation.
 
 Do not spend four notebooks on neighboring thresholds of the same mechanism.
 
+## Immediate next major compute wave
+
+The highest-value missing asset is a substantially larger **independent causal dataset**.
+
+Generate bounded counterfactual branches across:
+
+- fixed hard seeds;
+- safe controls;
+- seat-asymmetry seeds;
+- new random seeds;
+- multiple opponent families;
+- both seats.
+
+Priority intervention families:
+
+1. HIRE suppress/delay around days 5-12;
+2. strawberry-seed half/suppress around the first major expansion wave;
+3. land timing around the second and third quadrant purchase;
+4. wheat procurement/reserve only in high predicted loss-risk regimes;
+5. premium sale timing only for forecast targets that pass unseen-family reliability.
+
+The target learner should estimate:
+
+```text
+P(DeltaMargin > 0)
+E[DeltaMargin]
+Q10(DeltaMargin)
+P(loss -> win)
+```
+
+The runtime residual should remain tiny.
+
+## Population-level evolution
+
+PSRO / double-oracle methods become useful once the project has genuinely different specialists.
+
+A future population might contain:
+
+- V32 stable control;
+- hard-regime capital specialist;
+- feed/wheat-deficit specialist;
+- early-expansion specialist;
+- anti-premium-liquidation specialist;
+- terminal-control specialist.
+
+The loop then becomes:
+
+```text
+current population
+    |
+    v
+solve payoff matrix / robust mixture
+    |
+    v
+identify exploitable weakness
+    |
+    v
+train best response from loss/counterfactual data
+    |
+    v
+validate specialist
+    |
+    v
+add to population
+    |
+    +---- repeat
+```
+
 ## Submission-slot policy
 
-A daily slot should represent a distinct hypothesis with offline support.
+A live slot should represent a distinct hypothesis with a reason for existing.
 
 Never spend a slot on:
 
 - exact-byte clones;
 - zero-activation wrappers;
-- candidates that failed held-out promotion;
+- candidates that failed offline promotion when the goal is champion replacement;
 - candidates created solely because an early rating snapshot is noisy;
 - infrastructure-invalid experiments.
 
-Prefer one strong submission with a known causal reason over four speculative variants.
-
-## Medium-term architecture
-
-If Wave 19 supports the current thesis, evolve toward:
-
-```text
-Exact V32 / stronger validated backbone
-        |
-        v
-FarmLedger belief state
-        |
-        v
-Opponent 4/12/24-turn forecast
-        |
-        v
-Relative-value market/capital residual
-        |
-        v
-Confidence gate + deterministic fallback
-        |
-        v
-Persistent validated agent
-```
-
-Later research can add:
-
-- persistent worker ownership / route hysteresis;
-- short-horizon economic MPC for crop/animal allocation;
-- population payoff matrix / PSRO or fictitious-play mixtures;
-- adversarial camouflage against public-state routers;
-- online opponent-state updates that do not require identifying a named public family.
+The NeuroLoss-5 family is a special case because the slots are intentionally being used as an **ablation experiment**. Each agent isolates a different learning mechanism and is tracked accordingly.
 
 ## Definition of real progress
 
@@ -248,8 +292,10 @@ A version number is not progress. Real progress is one of:
 
 - a new causal mechanism with held-out support;
 - a substantial reduction in a known failure mode;
-- a new adversarial evaluation set that changes promotion quality;
-- a promoted agent that beats the champion on fresh paired games without sacrificing robustness;
-- a reproducible live rating improvement consistent with offline evidence.
+- a new adversarial evaluation set that improves promotion quality;
+- a learned residual whose induced policy has positive whole-seed out-of-fold value;
+- a strategically distinct specialist that improves population robustness;
+- a promoted agent that beats the champion on fresh paired games without sacrificing safe regimes;
+- a reproducible live improvement consistent with the mechanism being tested.
 
 Everything else belongs in diagnostics, not in the champion.

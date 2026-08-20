@@ -1,0 +1,63 @@
+{
+  "campaign": "five_slot_diversity",
+  "anchor": "SUBMIT_V32_RUNTIME_VERIFIED.tar.gz",
+  "anchor_sha256": "ad54a3f9bb94d3123997887da53e71ab69785d5d14ad0f53c51b7691e21d7811",
+  "runtime_contract": {
+    "archive_members": ["main.py", "soil_parent/main.py"],
+    "exec_style_last_callable_gate": true,
+    "prepack_full_episode_gate": true,
+    "postpack_full_episode_gate": true,
+    "market_order_cap": 10,
+    "dataclass_free_overlay": true
+  },
+  "recommended_order": [
+    "P1_DEMAND_PULSE_ARBITRAGE",
+    "P2_SHADOW_PRIORITY",
+    "P3_PREDATORY_MARGIN_DENIAL",
+    "P4_WHEAT_CORNER",
+    "P5_TEMPORAL_META_SWITCHER"
+  ],
+  "candidates": [
+    {
+      "label": "P1_DEMAND_PULSE_ARBITRAGE",
+      "sha256": "4d6e0079a7f44ef1c696958ad129458bbcc7e874d7fbc83c74d0f1dce8d95c94",
+      "bytes": 24759,
+      "last_callable": "p1_demand_pulse_agent",
+      "hypothesis": "exploit deterministic post-market town-demand scarcity pulses with a capped premium sale",
+      "local_priority_screen": {"games": 12, "direct_score_vs_v32": 0.75, "mean_margin": 205.9166666667, "median_margin": 85.0, "positive": 9, "negative": 3}
+    },
+    {
+      "label": "P2_SHADOW_PRIORITY",
+      "sha256": "06d630a6be5ac003741ff81c07ff290bff8ea4589f8e6998a0570634f59c00b6",
+      "bytes": 24680,
+      "last_callable": "p2_shadow_priority_agent",
+      "hypothesis": "sort existing premium sells by exact price-curve delay risk without changing quantities"
+    },
+    {
+      "label": "P3_PREDATORY_MARGIN_DENIAL",
+      "sha256": "8c42fd46bf23bdbac68589c2e18a6e904c6b6e1053109f34710f7c965cd9dd0f",
+      "bytes": 24775,
+      "last_callable": "p3_predatory_margin_agent",
+      "hypothesis": "optimize relative margin by using a capped sale to degrade a larger opponent premium pipeline"
+    },
+    {
+      "label": "P4_WHEAT_CORNER",
+      "sha256": "24141cfc2b1638f433b91a950290e96466698b445faa7c454c9daeda34904fd7",
+      "bytes": 24621,
+      "last_callable": "p4_wheat_corner_agent",
+      "hypothesis": "apply a tiny input-market squeeze only against visibly feed-dependent animal economies"
+    },
+    {
+      "label": "P5_TEMPORAL_META_SWITCHER",
+      "sha256": "996a2e69f1f81ecfabc508d522219bec128533b69ba69b6ec92e26c15f59db71",
+      "bytes": 25470,
+      "last_callable": "p5_temporal_meta_agent",
+      "hypothesis": "detect persistent within-game strategy divergence and select a bounded specialist response"
+    }
+  ],
+  "notes": [
+    "P3/P4/P5 intentionally remain exact V32 against symmetric V32-like states until their specialist gates fire.",
+    "P1 local priority screen is a small mechanism screen, not a promotion claim.",
+    "V33 runtime failure was traced to dataclass annotation handling under an exec-style loader namespace and should be repaired separately rather than consuming a live slot."
+  ]
+}

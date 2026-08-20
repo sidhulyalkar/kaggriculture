@@ -40,6 +40,10 @@ def counts(**updates):
     return out
 
 
+def hire_count(actions):
+    return sum(a[0] == "HIRE" for a in actions if isinstance(a, list) and a)
+
+
 def test_cheap_hires_are_preserved():
     twin = LabourOptionTwin()
     v = twin.value_hire(obs(day=6, hires_today=0), counts(), units=3, hires_today=0, cash=5000)
@@ -115,8 +119,6 @@ def test_late_capital_latch_activates_once_on_large_public_lead():
     assert mind.capital_latch == "DEFEND"
     assert mind.latched_lead == 7000
 
-    # The latch is intentionally persistent. A later scoreboard reversal cannot
-    # create turn-level policy oscillation or opponent-steerable mode churn.
     later = obs(day=25, hour=0, money=6000, opponent_money=20000, hands=0, hires_today=0,
                 quadrants=["NW", "NE", "SW"])
     mind._update_capital_latch(later)
@@ -130,15 +132,38 @@ def test_late_capital_latch_stays_base_below_lead_threshold():
     assert mind.capital_latch == "BASE"
 
 
-def test_midgame_intervention_budget_is_at_most_one_hire_per_day():
+def test_midgame_gate_changes_only_the_last_expensive_marginal_hire():
+    # After the first market turn of the day, ten hands may already exist and
+    # V32 asks for the 11th/12th/13th hires. Only the $233 marginal hire is
+    # eligible in BASE mode, so this state must produce exactly one suppression.
     mind = V33WorkGraphMind()
-    o = obs(day=11, hour=0, money=1000, opponent_money=1000, hands=0, hires_today=0,
+    o = obs(day=11, hour=1, money=1000, opponent_money=1000, hands=10, hires_today=10,
             quadrants=["NW", "NE"])
     base = super(V33WorkGraphMind, mind)._market(o, counts())
     changed = mind._market(o, counts())
-    base_hires = sum(a[0] == "HIRE" for a in base if isinstance(a, list) and a)
-    changed_hires = sum(a[0] == "HIRE" for a in changed if isinstance(a, list) and a)
-    assert 0 <= base_hires - changed_hires <= 1
+    assert hire_count(base) - hire_count(changed) == 1
+    assert mind._suppressed_today == 1
+
+
+def test_late_defend_can_remove_two_redundant_expensive_hires():
+    mind = V33WorkGraphMind()
+    o = obs(day=24, hour=2, money=12000, opponent_money=5000, hands=10, hires_today=10,
+            quadrants=["NW", "NE", "SW"])
+    base = super(V33WorkGraphMind, mind)._market(o, counts())
+    changed = mind._market(o, counts())
+    assert mind.capital_latch == "DEFEND"
+    assert hire_count(base) - hire_count(changed) == 2
+    assert mind._suppressed_today == 2
+
+
+def test_late_base_mode_is_exact_v32_on_same_marginal_hire_state():
+    mind = V33WorkGraphMind()
+    o = obs(day=24, hour=2, money=11000, opponent_money=5000, hands=10, hires_today=10,
+            quadrants=["NW", "NE", "SW"])
+    base = super(V33WorkGraphMind, mind)._market(o, counts())
+    changed = mind._market(o, counts())
+    assert mind.capital_latch == "BASE"
+    assert changed == base
 
 
 def test_generated_submission_is_single_file_loader_safe():

@@ -18,3 +18,4 @@ jobs:
       - run: python scripts/build_submission.py
       - run: python scripts/check_submission.py artifacts/submission_v2.tar.gz
       - run: python scripts/build_v33_workgraph_submission.py --dev-base-source submission/base_controller.py
+      - run: python scripts/evaluate_v33_workgraph.py --dev-base-source submission/base_controller.py --seeds 16 --out artifacts/v33_dev_direct.json

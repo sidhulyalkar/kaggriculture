@@ -5,17 +5,18 @@ from __future__ import annotations
 The older runtime archetype model classified one public snapshot at a time.
 That is useful for identity/style priors, but it cannot tell the difference
 between "this opponent is animal-heavy" and "this opponent just pivoted into an
-animal-heavy phase".  This module treats strategy as a latent *time varying*
+animal-heavy phase". This module treats strategy as a latent *time varying*
 state.
 
-The tracker has two layers:
+The tracker has three complementary signals:
 
-1. an online change detector built from short/long EWMA disagreement and a
-   one-sided CUSUM; and
-2. an optional motif posterior over replay-trained strategy segment centroids.
+1. short/long EWMA disagreement for sustained behavioral drift;
+2. a decaying structural-shock memory for discrete strategic commitments such
+   as hiring, land expansion, crop removal, or an animal-build jump; and
+3. an optional motif posterior over replay-trained strategy-segment centroids.
 
-It never changes an action itself.  It produces a belief state for a separate
-safe response selector.  Missing/weak evidence therefore defaults to the
+It never changes an action itself. It produces a belief state for a separate
+safe response selector. Missing/weak evidence therefore defaults to the
 champion policy rather than forcing a strategy switch.
 """
 
@@ -79,7 +80,7 @@ def _scan(farm):
 def opponent_snapshot(obs):
     """Return an online-safe public description of the opponent.
 
-    No private opponent inventory is used.  All features are visible in the
+    No private opponent inventory is used. All features are visible in the
     runtime observation and can therefore be reproduced in offline replays.
     """
     p = int(obs.get("player", 0) or 0)
@@ -103,7 +104,7 @@ def opponent_snapshot(obs):
         out["count_" + x] = float(counts[x])
         out["ready_" + x] = float(ready[x])
     # Market context is not opponent-specific, but strategy pivots often become
-    # visible as supply shocks.  The response model can learn whether a shock is
+    # visible as supply shocks. The response model can learn whether a shock is
     # useful after conditioning on our own known previous action.
     for x in PRODUCTS:
         out["market_inv_" + x] = float(inv.get(x, 10000) or 10000)
@@ -124,7 +125,7 @@ DEFAULT_DELTA_FEATURES = (
 class TemporalOpponentTracker:
     """Online strategy belief with change-point hysteresis.
 
-    ``model`` is an optional JSON-compatible artifact produced offline.  Its
+    ``model`` is an optional JSON-compatible artifact produced offline. Its
     minimal schema is::
 
         {
@@ -152,6 +153,8 @@ class TemporalOpponentTracker:
         self.confirm_steps = int(self.model.get("confirm_steps", 3))
         self.cusum_k = float(self.model.get("cusum_k", 0.55))
         self.cusum_h = float(self.model.get("cusum_h", 3.0))
+        self.shock_decay = float(self.model.get("shock_decay", 0.72))
+        self.shock_weight = float(self.model.get("shock_weight", 0.95))
         self.temperature = max(1e-6, float(self.model.get("temperature", 1.0)))
         self.reset()
 
@@ -162,6 +165,7 @@ class TemporalOpponentTracker:
         self.long = {}
         self.abs_dev = {}
         self.cusum = 0.0
+        self.shock_memory = 0.0
         self.change_probability = 0.0
         self.change_streak = 0
         self.segment_start = 0
@@ -200,6 +204,27 @@ class TemporalOpponentTracker:
         # dimensions survive the many near-zero dimensions in the full vector.
         k = min(6, len(terms))
         return sum(terms[:k]) / max(1, k)
+
+    def _structural_shock(self, delta):
+        """Score discrete commitments whose strategic effect persists.
+
+        A level shift is visible as a one-turn delta, so a delta-only CUSUM can
+        forget it before a multi-step confirmation gate fires. This score is
+        deliberately restricted to durable structural changes and excludes raw
+        market inventory noise.
+        """
+        hands = abs(float(delta.get("d_hands", 0.0))) / 2.0
+        quads = 1.75 * abs(float(delta.get("d_quadrants", 0.0)))
+        buildings = 0.90 * (
+            abs(float(delta.get("d_pasture", 0.0)))
+            + abs(float(delta.get("d_coop", 0.0)))
+        )
+        crop_shift = sum(abs(float(delta.get("d_count_" + x, 0.0))) for x in CROPS) / 4.0
+        animal_shift = 1.15 * sum(abs(float(delta.get("d_count_" + x, 0.0))) for x in ANIMALS) / 2.0
+        # Cash is informative only when unusually large; ordinary income noise
+        # should not masquerade as a strategy switch.
+        money = max(0.0, abs(float(delta.get("d_money", 0.0))) - 750.0) / 2500.0
+        return min(8.0, hands + quads + buildings + crop_shift + animal_shift + money)
 
     def _motif_posterior(self, delta):
         motifs = list(self.model.get("motifs") or [])
@@ -247,14 +272,18 @@ class TemporalOpponentTracker:
         self.last_delta = delta
         self._update_ewma(delta)
         surprise = self._surprise()
+        structural_shock = self._structural_shock(delta)
+        self.shock_memory = self.shock_decay * self.shock_memory + structural_shock
 
-        # A bounded BOCPD-inspired hazard + CUSUM approximation.  It is much
-        # cheaper than carrying a full run-length posterior for 719 turns, but
-        # still distinguishes persistent drift from one noisy market tick.
+        # A bounded BOCPD-inspired hazard + CUSUM approximation. Persistent drift
+        # enters through surprise/CUSUM; discrete strategic commitments enter via
+        # decaying shock memory. A one-turn market tick contributes to neither
+        # durable signal strongly enough to pass confirmation by itself.
         innovation = max(0.0, surprise - self.cusum_k)
         self.cusum = max(0.0, 0.82 * self.cusum + innovation)
         hazard_logit = math.log(max(1e-6, self.hazard) / max(1e-6, 1.0 - self.hazard))
-        self.change_probability = _sigmoid(hazard_logit + 1.55 * (self.cusum - self.cusum_h))
+        evidence = 1.55 * (self.cusum - self.cusum_h) + self.shock_weight * self.shock_memory
+        self.change_probability = _sigmoid(hazard_logit + evidence)
         if self.change_probability >= self.change_threshold:
             self.change_streak += 1
         else:
@@ -265,6 +294,7 @@ class TemporalOpponentTracker:
             self.segment_start = step
             self.change_streak = 0
             self.cusum *= 0.30
+            self.shock_memory *= 0.25
 
         post, confidence = self._motif_posterior(delta)
         self.posterior = post
@@ -278,9 +308,14 @@ class TemporalOpponentTracker:
             needed = 2 if confirmed_change else 4
             if confidence >= float(self.model.get("motif_confidence", 0.45)) and self.candidate_streak >= needed:
                 self.current_motif = best
-        return self.belief(confirmed_change=confirmed_change, surprise=surprise, confidence=confidence)
+        return self.belief(
+            confirmed_change=confirmed_change,
+            surprise=surprise,
+            confidence=confidence,
+            structural_shock=structural_shock,
+        )
 
-    def belief(self, confirmed_change=False, surprise=0.0, confidence=None):
+    def belief(self, confirmed_change=False, surprise=0.0, confidence=None, structural_shock=0.0):
         motifs = list(self.model.get("motifs") or [])
         name = None
         if self.current_motif is not None and self.current_motif < len(motifs):
@@ -297,4 +332,6 @@ class TemporalOpponentTracker:
             "segment_age": max(0, int(self.last_step - self.segment_start)),
             "change_count": int(self.change_count),
             "surprise": float(surprise),
+            "structural_shock": float(structural_shock),
+            "shock_memory": float(self.shock_memory),
         }

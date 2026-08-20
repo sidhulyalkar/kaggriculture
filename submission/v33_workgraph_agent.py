@@ -1,14 +1,14 @@
 """V33 WorkGraph: a conservative labor-option residual over the V32 backbone.
 
 The design intentionally leaves V32's production plan, market selling, routing,
-crop targets, animal targets, and terminal behavior untouched.  It models only
+crop targets, animal targets, and terminal behavior untouched. It models only
 one thing V32 currently treats as a fixed schedule: the value of another hand
 that expires at the end of the current day.
 
-A hand is viewed as a short-dated option on the visible work queue.  The model
+A hand is viewed as a short-dated option on the visible work queue. The model
 prices that option from task urgency, estimated economic consequence, remaining
 hours, travel/service efficiency, existing labor capacity, and the Fibonacci
-hire cost.  Expensive marginal hires are suppressed only when every robust
+hire cost. Expensive marginal hires are suppressed only when every robust
 scenario says the remaining work cannot justify them.
 """
 from __future__ import annotations
@@ -47,14 +47,11 @@ class HireValuation:
 class LabourOptionTwin:
     """Small structural world-model for one ephemeral additional hand.
 
-    This is not a learned opponent classifier.  It is an explicit model of the
-    farm's currently visible service queue.  Uncertainty is represented by
+    This is not a learned opponent classifier. It is an explicit model of the
+    farm's currently visible service queue. Uncertainty is represented by
     three efficiency/value scenarios and the decision uses a lower-tail blend.
     """
 
-    # Average task completions per available hour under pessimistic/neutral/
-    # optimistic routing efficiency.  The neutral value corresponds to roughly
-    # 3.5-4 moves/actions per useful task on the compact farm grid.
     SCENARIOS = (
         (0.52, 0.82),
         (0.70, 1.00),
@@ -100,12 +97,12 @@ class LabourOptionTwin:
                     if cd is None:
                         continue
                     price = self._market_price(obs, crop)
-                    age = day - int(tile.get("planted_day", day) or day)
+                    planted_day = tile.get("planted_day", day)
+                    planted_day = day if planted_day is None else int(planted_day)
+                    age = day - planted_day
                     yld = max(0, int(tile.get("yield_units", 0) or 0))
                     dry = int(tile.get("consecutive_unwatered", 0) or 0)
                     if not tile.get("watered_today", False):
-                        # Planting-day watering and an existing dry streak carry
-                        # asymmetric downside, so they dominate the queue.
                         w = 2.35 if age == 0 or dry >= 1 else 1.25
                         backlog += w
                         econ += w * max(35.0, 0.42 * price * cd.get("max_yield", 1))
@@ -114,7 +111,9 @@ class LabourOptionTwin:
                     if yld > 0 and age >= int(cd.get("first", 0)):
                         backlog += 1.10
                         econ += max(25.0, 0.72 * yld * price)
-                    if crop == "STRAWBERRY" and age >= 7 and int(tile.get("fertilized_until_day", -1) or -1) <= day + 1:
+                    fert_until = tile.get("fertilized_until_day", -1)
+                    fert_until = -1 if fert_until is None else int(fert_until)
+                    if crop == "STRAWBERRY" and age >= 7 and fert_until <= day + 1:
                         backlog += 0.45
                         econ += max(18.0, 0.18 * price * cd.get("max_yield", 1))
                     continue
@@ -140,9 +139,6 @@ class LabourOptionTwin:
                         backlog += 0.55
                         econ += max(16.0, 0.16 * price)
 
-        # Add a bounded estimate for constructive work that is not represented
-        # by an existing tile task yet.  This prevents the model from declaring
-        # a newly expanded but empty farm "idle".
         animals = sum(int(counts.get(a, 0) or 0) for a in ANIMALS)
         crops = sum(int(counts.get(c, 0) or 0) for c in CROPS)
         productive_tiles = animals + crops
@@ -151,13 +147,10 @@ class LabourOptionTwin:
             backlog += construction
             econ += construction * (48.0 if day < 12 else 34.0)
 
-        # Existing labor also has to absorb predictable within-day arrivals.
         arrival = min(5.0, 0.030 * productive_tiles * hours_left + 0.045 * animals * hours_left)
         backlog += arrival
         econ += arrival * 42.0
 
-        # Capacity is intentionally conservative: a unit rarely converts every
-        # hour into productive work because it must walk, load, and unload.
         existing_capacity = max(0.0, units * hours_left * 0.70 / 4.0)
         hand_capacity = max(0.0, hours_left * 0.70 / 4.0)
         return WorkGraphState(
@@ -200,9 +193,6 @@ class LabourOptionTwin:
         lower = min(scenario_values)
         robust = 0.55 * expected + 0.45 * lower
 
-        # Cash saved today has option value around the two V32 land-expansion
-        # cliffs and when liquid reserves are thin.  We do not invent a land
-        # purchase; this only raises the hurdle for an expiring hand.
         q = 1
         p = int(obs.get("player", 0) or 0)
         farms = obs.get("farms", []) or []
@@ -218,9 +208,6 @@ class LabourOptionTwin:
         robust = max(0.0, robust - option_penalty)
         roi = robust / max(1.0, cost)
 
-        # Critical feed/water work is a hard safety exception.  If the current
-        # crew cannot cover most critical work, preserve V32's hire even when
-        # the pure dollar model is pessimistic.
         critical_gap = max(0.0, state.critical - state.existing_capacity)
         if critical_gap >= 1.25:
             keep, reason = True, "critical_service_gap"
@@ -250,7 +237,6 @@ class V33WorkGraphMind(HarvestMind):
             self._suppressed_today = 0
         self.last_valuations = []
 
-        # Preserve V32 exactly in the opening, late game, and late-night cleanup.
         if day < 5 or day > 18 or hour > 20 or self._suppressed_today >= 2:
             return baseline
         if not any(isinstance(a, list) and a and a[0] == "HIRE" for a in baseline):

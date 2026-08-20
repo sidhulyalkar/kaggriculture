@@ -1,93 +1,82 @@
 # V33 WorkGraph: Counterfactual Capital Twin
 
-## Thesis
+## Decision
 
-V32 remains the live control. Recent experiments established two facts that should shape the next design:
+V32 remains the live champion. V33 is a research candidate that wraps the **exact runtime-verified V32 artifact** and is allowed to change only one action family: a small number of expensive `HIRE` orders.
 
-1. hard games are often recognizable from public state;
-2. recognizing danger does not mean we know the correct broad counter-policy.
+The production builder will refuse to create a submission if the supplied V32 archive does not match the champion SHA-256:
 
-V33 therefore changes the unit of adaptation. Instead of asking *which strategy should replace V32?*, it asks:
+`ad54a3f9bb94d3123997887da53e71ab69785d5d14ad0f53c51b7691e21d7811`
 
-> What is this exact V32 action worth in the state we are actually in?
+This is deliberate. A V33 experiment built on a merely similar controller is not evidence about improving V32.
 
-The first action family is HIRE because temporary hands disappear at the end of the day while their price follows a steep Fibonacci curve. A $1 hand and a $233 hand are not economically equivalent simply because both help reach the same fixed daily target.
+## Why rethink the architecture
 
-V33 treats the marginal hand as a short-dated option on the visible work queue.
+Recent experiments produced a consistent pattern:
 
-## Public-frontier lesson incorporated without copying its policy
+- difficult V32 regimes are predictable from public state;
+- opponent sale behavior is often predictable;
+- broad policy switches and forecast-triggered market actions have not converted that prediction quality into better gameplay;
+- Wave 18B found rare, very large single-decision regret around `HIRE` and strawberry-seed decisions, but unconditional intervention was harmful.
 
-A current public competitor report provides an important independent clue. `Seyamalam/Kaggriculture` V21 showed that an unconditional late policy change was harmful, while a **one-time public-bank lead latch** could safely disable a risky late residual in already-buffered wins. Their report used a different backbone and a different market intervention.
+So V33 changes the unit of adaptation.
 
-V33 does not copy that market logic. It adopts the more general experimental lesson:
-
-> late-game risk mode should be latched once from an online-safe public signal, not recomputed every turn and not applied globally.
-
-Reference: `Seyamalam/Kaggriculture/reports/v21-capital-latch.md`.
-
-## Architecture
+Instead of asking:
 
 ```text
-                         observation
-                              |
-                              v
-                       V32-style backbone
-                              |
-                 +------------+-------------+
-                 |                          |
-                 v                          v
-           all non-HIRE actions       proposed HIREs
-                 |                          |
-                 |                          v
-                 |                   WorkGraph twin
-                 |                          |
-                 |                robust marginal value
-                 |                          |
-                 +-------------+------------+
-                               |
-                       tiny residual gate
-                               |
-                  +------------+-------------+
-                  |                          |
-             preserve V32             suppress HIRE
-                                           only
+Which strategy should replace V32?
 ```
 
-At step 577 a second signal becomes available:
+it asks:
 
 ```text
-public bank lead read once
-          |
-          +-- lead < $6,500 --> BASE forever
-          |
-          +-- lead >= $6,500 -> DEFEND forever
+V32 proposed this exact action.
+What is the state-dependent marginal value of that action?
 ```
 
-The mode is latched. An opponent cannot create turn-level oscillation by briefly changing the scoreboard after the checkpoint.
+## Black-box champion architecture
 
-## What V33 leaves untouched
+```text
+observation
+    |
+    v
+EXACT V32 artifact
+    |
+    v
+complete V32 action dictionary
+    |
+    +-------------------------------+
+    |                               |
+non-HIRE actions                proposed HIREs
+immutable                          |
+                                  v
+                           WorkGraph twin
+                                  |
+                         marginal labor value
+                                  |
+                     +------------+------------+
+                     |                         |
+                  uncertain                certified
+                     |                         |
+                     v                         v
+                 keep V32              remove HIRE only
+```
 
-V33 deliberately does **not** change:
+The final Kaggle file embeds exact V32 source in an isolated namespace and then calls it first on every turn. V33 deep-copies the result and only filters eligible `HIRE` orders.
 
-- crop targets;
-- animal targets;
-- premium-first sell logic;
-- wheat/feed purchase volume;
-- land timing;
-- animal purchases;
-- seed volume;
-- farmer movement;
-- hand routing;
-- watering/feeding/harvest priorities;
-- terminal liquidation.
+Therefore, when the gate is inactive:
 
-This is not another full policy switch. It is a capital-allocation residual around one exact V32 decision family.
+> **V33 is exact black-box action parity with V32.**
 
-## WorkGraph state
+V33 does not need to know or reimplement V32's crop plan, route, market model, or internal state.
 
-The runtime model converts the visible farm into economically weighted service demand.
+## WorkGraph world model
 
-Critical/high-value work includes:
+Temporary hands disappear at the end of the day while hire cost rises on a Fibonacci curve. The value of another hand depends on the work it can actually complete before expiry.
+
+WorkGraph converts visible farm state into an economically weighted service queue.
+
+High-value or critical work includes:
 
 - planting-day watering;
 - already-dry crops;
@@ -99,11 +88,11 @@ Lower-weight work includes:
 - care;
 - fertilizer collection;
 - weeds;
-- bounded construction/planting demand on empty tiles.
+- bounded constructive demand from available land.
 
-The model also estimates predictable within-day arrivals from productive crop and animal count.
+It also estimates a bounded amount of predictable work arriving later in the same day from productive crop and animal counts.
 
-The resulting structural state is:
+The structural state is:
 
 ```text
 backlog
@@ -111,180 +100,146 @@ weighted economic consequence
 critical-service demand
 existing labor capacity
 marginal hand capacity
-hours before temporary labor expires
+hours until labor expires
 ```
 
-## Ephemeral labor option model
+## Distributional value instead of a point estimate
 
-Each proposed hand is valued under three execution scenarios:
+The marginal hand is evaluated under three execution scenarios:
 
-1. pessimistic routing/service efficiency;
-2. neutral efficiency;
-3. optimistic efficiency.
+```text
+pessimistic
+neutral
+optimistic
+```
 
 For each scenario:
 
 ```text
 residual_queue = max(0, backlog - existing_capacity)
-
-useful_tasks
-    = min(residual_queue, marginal_hand_capacity)
-
-scenario_value
-    = useful_tasks * economic_value_per_task
+useful_tasks = min(residual_queue, marginal_hand_capacity)
+scenario_value = useful_tasks * economic_value_per_task
 ```
 
-V33 deliberately weights the lower tail:
+The decision uses a lower-tail-biased value:
 
 ```text
 expected_value
-    = 0.25 * pessimistic
-    + 0.50 * neutral
-    + 0.25 * optimistic
+  = 0.25 * pessimistic
+  + 0.50 * neutral
+  + 0.25 * optimistic
 
 robust_value
-    = 0.55 * expected_value
-    + 0.45 * worst_scenario_value
-```
+  = 0.55 * expected_value
+  + 0.45 * worst_scenario_value
 
-The relevant object is not raw value but:
-
-```text
 robust_roi = robust_value / next_fibonacci_hire_cost
 ```
 
+This is intentionally closer to a tiny model-predictive controller than a classifier.
+
 ## Capital optionality
 
-Saved cash persists. A hand does not.
+A hand expires. Cash survives.
 
-Around the two V32 expansion cliffs the model therefore charges temporary labor an additional opportunity-cost penalty. This does not create or advance a land purchase. It simply makes an expiring hand prove that it deserves capital that may shortly fund a persistent productive asset.
+V33 therefore prices the opportunity cost of consuming liquid capital around expansion cliffs and when reserves are thin. It does **not** move land purchases or invent new purchases. It only raises the hurdle an expiring hand must clear.
 
 ## Intervention firewall
 
-The initial implementation was intentionally tightened after reviewing the full live evidence. V33 is now much more conservative than a generic `robust_roi < 1` rule.
-
 ### Midgame
 
-Only days 11-18 are eligible.
+Only days `11-18` are eligible.
 
-At most **one** HIRE can be suppressed per day, and only if all conditions hold:
+At most **one** hire may be removed per day, and only when:
 
-- the next hire costs at least `$233`;
-- robust ROI is below `0.60`;
-- current cash is below `$3,500` or the third quadrant is not yet unlocked;
-- there is no critical feed/water service gap.
+- the counterfactual next hire costs at least `$233`;
+- `robust_roi < 0.60`;
+- cash is below `$3,500` or the third quadrant is not unlocked;
+- critical feed/water work is already covered.
 
-So the midgame model cannot quietly rewrite V32 into an 11-hand strategy.
+### Late DEFEND latch
 
-### Late DEFEND mode
+At the first observation at or after step `577`, V33 reads the public bank difference exactly once.
 
-At the first observation at or after step `577`, V33 reads public bank values once.
+```text
+own lead < $6,500  -> BASE forever
+own lead >= $6,500 -> DEFEND forever
+```
 
-If own bank exceeds opponent bank by at least `$6,500`, DEFEND is latched for the remainder of the episode.
+The latch is never recomputed, preventing turn-level policy churn or easy opponent steering.
 
-Only days 24-27 are eligible. At most two expensive hires may be suppressed per day, and only if:
+In DEFEND, only days `24-27` are eligible. At most two hires may be removed per day, and only when:
 
 - hire cost is at least `$144`;
-- robust ROI is below `0.90`;
-- critical work is already covered.
+- `robust_roi < 0.90`;
+- critical work is covered.
 
-If the lead is smaller, the mode latches BASE and the entire late-game policy stays V32.
+There is deliberately no CHASE mode. We do not yet have causal evidence for a safe aggressive residual when behind.
 
-There is intentionally no CHASE mode in V33. We do not yet have causal evidence for a safe aggressive late residual.
+## Public-frontier lesson
 
-## Why this is different from N3 / N5 / N6 / N7
+A public competitor's V20/V21 research provides a useful independent design clue: an unconditional late change hurt strong-opponent cases, while a one-time online-safe capital latch made the late residual selective. Their backbone and intervention are different from ours; V33 adopts only the general experimental principle of a latched late risk gate.
 
-Those experiments mostly asked questions such as:
+Reference: `Seyamalam/Kaggriculture/reports/v20-late-abstain-screen.md` and `reports/v21-capital-latch.md`.
 
-```text
-Is this a hard opponent?
-Is V32 likely to lose?
-Will supply arrive soon?
-```
+## Production build
 
-Those predictions can be excellent while the resulting action still has negative value.
-
-V33 instead asks:
-
-```text
-If V32 wants to buy this exact marginal hand,
-what work can that hand plausibly complete before expiry,
-what is that work worth,
-and what persistent capital are we giving up?
-```
-
-Risk diagnosis is context. Action value is the gate.
-
-## Why HIRE is the right first target
-
-Wave 18B found that only `52 / 600` single-decision branches were positive and none of the tested branches flipped a loss to a win in that small sample. However, some HIRE and strawberry-seed branches changed final margin by several thousand dollars, occasionally above `$10k`.
-
-The unconditional mean was negative, so the lesson was never "stop hiring." The lesson was:
-
-> the marginal value of an expensive hire is strongly state dependent.
-
-WorkGraph is a structural attempt to model that state dependence before we have enough independent counterfactual seeds for a reliable learned regret model.
-
-## Runtime artifact
-
-Build with:
+The exact champion archive is intentionally required:
 
 ```bash
-python scripts/build_v33_workgraph_submission.py
+python scripts/build_v33_workgraph_submission.py \
+  --v32-tar /path/to/SUBMIT_V32_RUNTIME_VERIFIED.tar.gz
 ```
 
-The builder emits:
+Outputs:
 
 ```text
-artifacts/SUBMIT_V33_WORKGRAPH.py
-artifacts/SUBMIT_V33_WORKGRAPH.tar.gz
-artifacts/SUBMIT_V33_WORKGRAPH.manifest.json
+artifacts/SUBMIT_V33_WORKGRAPH_EXACT_V32.py
+artifacts/SUBMIT_V33_WORKGRAPH_EXACT_V32.tar.gz
+artifacts/SUBMIT_V33_WORKGRAPH_EXACT_V32.manifest.json
 ```
 
-It then checks the exact Kaggle runtime contract:
+The builder:
 
-1. compose one standalone source file;
-2. forbid `__file__` in final source;
-3. reproduce compile/exec loading;
-4. confirm `agent` is the last callable;
-5. execute a synthetic observation;
-6. package exactly one root `main.py`;
-7. re-extract the exact archive;
-8. run the loader gate again;
-9. record source and archive SHA-256 hashes.
+1. verifies the exact V32 tar SHA-256;
+2. extracts its single root `main.py`;
+3. independently validates the V32 last-callable contract;
+4. compresses and embeds those exact champion bytes into the V33 single-file runtime;
+5. isolates V32 globals from V33 globals;
+6. verifies no `__file__` dependency in the final source;
+7. checks that final `agent` is the last callable;
+8. performs a synthetic runtime call;
+9. creates a deterministic one-file tar archive;
+10. extracts and validates the exact final archive again;
+11. records base/source/archive hashes in the manifest.
 
-## Required offline evaluation
+CI uses an explicit `--dev-base-source` mode only to exercise packaging mechanics. Its manifest is marked `base_verified_champion=false` and is **not submission-ready**.
 
-V33 should be evaluated against exact V32 with the same seed and both seats.
+## Direct exact-control screen
 
-Primary outcome diagnostics:
+Once the exact V32 tar is present:
 
-- paired win delta;
-- V32 win -> V33 loss flips;
-- V32 loss -> V33 win flips;
-- paired final-cash delta;
-- worst opponent-family delta.
+```bash
+python scripts/evaluate_v33_workgraph.py \
+  --v32-tar /path/to/SUBMIT_V32_RUNTIME_VERIFIED.tar.gz \
+  --seeds 64
+```
 
-Mechanism diagnostics:
+This loads V32 into independent namespaces for the control and the V33-wrapped copy, runs both seats on each seed, and records:
 
-- number of V32 HIRE proposals;
-- V33 suppressions;
-- hire cost suppressed;
-- day/hour of activation;
-- WorkGraph backlog and robust ROI;
-- critical-service exceptions;
-- capital-latch mode and checkpoint lead;
-- next-day cash difference;
-- downstream land/animal/seed timing;
-- preventable weeds or animal feed failures.
+- direct V33 score versus V32;
+- cash margin;
+- intervention frequency;
+- value conditional on intervention;
+- late latch mode and checkpoint lead.
 
-The most important statistic is **realized policy value conditional on activation**.
+This direct screen is necessary but not sufficient. Any survivor must still run against the fixed hard/safe/seat-asymmetry suites and the broad opponent zoo.
 
-## Promotion gate
+## Promotion contract
 
-V33 does not replace V32 because the model is clever. It replaces V32 only if the induced policy wins more games.
+The key question is not whether WorkGraph is elegant. It is whether the **induced policy** improves match outcomes.
 
-Recommended gate:
+Recommended promotion gates:
 
 ```text
 paired win delta vs V32             >= +0.015
@@ -295,27 +250,15 @@ Q10 paired margin delta             >= 0
 win -> loss flips                   <= loss -> win flips / 3
 preventable weed/escape regression  = 0
 invalid games                       = 0
-V32 parity when gate inactive       = 100%
+inactive-gate action parity         = 100%
 ```
 
-Thresholds must be frozen before an independent confirmation seed set.
+Thresholds must be frozen before independent confirmation.
 
-## Next evolution if V33 works
+## What V33 is trying to discover
 
-Do not immediately create a giant planner.
+V33 is not meant to be the final planner. It is a test of a new development philosophy:
 
-Use the same pattern on exactly one additional decision family:
+> **Treat the champion as an invariant. Price one proposed action at a time, and earn the right to change it.**
 
-```text
-V32 proposes action
-       |
-       v
-state-specific structural/counterfactual valuation
-       |
-       v
-change only when the lower-tail advantage clears a strict hurdle
-```
-
-The next likely candidates are strawberry seed volume or land timing. Once the Wave 20 counterfactual factory contains enough independent seeds, replace the hand-designed WorkGraph value with a calibrated distributional regret model while preserving the same firewall.
-
-That is the path from a strong fixed tape toward a safe model-predictive agent: **earn the right to change one action at a time.**
+If this works, the same black-box residual architecture can next evaluate strawberry seed volume or land timing. Once the counterfactual dataset has enough independent seeds, the hand-built structural value can be replaced by a calibrated distributional regret model without changing the safety firewall.

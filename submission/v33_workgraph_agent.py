@@ -1,15 +1,21 @@
-"""V33 WorkGraph: a conservative labor-option residual over the V32 backbone.
+"""V33 WorkGraph: a conservative capital-allocation residual over V32.
 
-The design intentionally leaves V32's production plan, market selling, routing,
-crop targets, animal targets, and terminal behavior untouched. It models only
-one thing V32 currently treats as a fixed schedule: the value of another hand
-that expires at the end of the current day.
+V33 leaves the production plan, selling policy, routes, crop targets, animal
+targets, and terminal mechanics untouched. It models one decision V32 treats
+as a fixed schedule: whether the *marginal* temporary hand is worth its
+Fibonacci cost before that hand expires at the end of the day.
 
-A hand is viewed as a short-dated option on the visible work queue. The model
-prices that option from task urgency, estimated economic consequence, remaining
-hours, travel/service efficiency, existing labor capacity, and the Fibonacci
-hire cost. Expensive marginal hires are suppressed only when every robust
-scenario says the remaining work cannot justify them.
+The agent combines two ideas:
+
+1. WorkGraph, a structural model of visible service demand and marginal labor
+   capacity under pessimistic/neutral/optimistic execution scenarios.
+2. A one-time late capital latch. At the late-game checkpoint the public bank
+   lead is read once. Only a comfortably leading farm enters DEFEND mode; the
+   latch never oscillates and never activates an aggressive counter-policy.
+
+The resulting residual is deliberately tiny. Midgame it can suppress only the
+single most expensive hire under strong capital pressure. In a latched late
+lead it may suppress at most two clearly redundant expensive hires per day.
 """
 from __future__ import annotations
 
@@ -45,12 +51,7 @@ class HireValuation:
 
 
 class LabourOptionTwin:
-    """Small structural world-model for one ephemeral additional hand.
-
-    This is not a learned opponent classifier. It is an explicit model of the
-    farm's currently visible service queue. Uncertainty is represented by
-    three efficiency/value scenarios and the decision uses a lower-tail blend.
-    """
+    """Structural world-model for one additional hand that expires tonight."""
 
     SCENARIOS = (
         (0.52, 0.82),
@@ -147,6 +148,8 @@ class LabourOptionTwin:
             backlog += construction
             econ += construction * (48.0 if day < 12 else 34.0)
 
+        # Predictable task arrivals during the rest of the day. This is bounded
+        # so a large farm cannot manufacture arbitrary justification for labor.
         arrival = min(5.0, 0.030 * productive_tiles * hours_left + 0.045 * animals * hours_left)
         backlog += arrival
         econ += arrival * 42.0
@@ -193,6 +196,9 @@ class LabourOptionTwin:
         lower = min(scenario_values)
         robust = 0.55 * expected + 0.45 * lower
 
+        # Cash has extra option value near V32's expansion cliffs. This penalty
+        # can only affect whether a HIRE is delayed; it never creates another
+        # purchase or changes its timing directly.
         q = 1
         p = int(obs.get("player", 0) or 0)
         farms = obs.get("farms", []) or []
@@ -219,17 +225,51 @@ class LabourOptionTwin:
 
 
 class V33WorkGraphMind(HarvestMind):
-    """Exact V32-style backbone with a sparse marginal-hire value gate."""
+    """V32 backbone plus a tiny state-valued capital residual."""
+
+    LATCH_STEP = 577
+    DEFEND_LEAD = 6500.0
 
     def __init__(self):
         super().__init__()
         self.twin = LabourOptionTwin()
         self._budget_day = -1
         self._suppressed_today = 0
+        self._capital_latch: str | None = None
+        self._latched_lead: float | None = None
         self.last_valuations: list[HireValuation] = []
+
+    @property
+    def capital_latch(self) -> str | None:
+        return self._capital_latch
+
+    @property
+    def latched_lead(self) -> float | None:
+        return self._latched_lead
+
+    def _update_capital_latch(self, obs: dict) -> None:
+        if self._capital_latch is not None:
+            return
+        step = int(obs.get("step", 0) or 0)
+        if step < self.LATCH_STEP:
+            return
+        farms = obs.get("farms", []) or []
+        p = int(obs.get("player", 0) or 0)
+        if len(farms) < 2 or p >= len(farms):
+            self._capital_latch = "BASE"
+            self._latched_lead = 0.0
+            return
+        other = 1 - p if len(farms) == 2 else next((i for i in range(len(farms)) if i != p), p)
+        own = float((farms[p] or {}).get("money", 0) or 0)
+        opp = float((farms[other] or {}).get("money", 0) or 0)
+        lead = own - opp
+        self._latched_lead = lead
+        self._capital_latch = "DEFEND" if lead >= self.DEFEND_LEAD else "BASE"
 
     def _market(self, obs: dict, counts: dict):
         baseline = super()._market(obs, counts)
+        self._update_capital_latch(obs)
+
         day = int(obs.get("day", 0) or 0)
         hour = int(obs.get("hour", 0) or 0)
         if day != self._budget_day:
@@ -237,9 +277,19 @@ class V33WorkGraphMind(HarvestMind):
             self._suppressed_today = 0
         self.last_valuations = []
 
-        if day < 5 or day > 18 or hour > 20 or self._suppressed_today >= 2:
+        midgame = 11 <= day <= 18
+        late_defend = self._capital_latch == "DEFEND" and 24 <= day <= 27
+        if not (midgame or late_defend) or hour > 20:
             return baseline
         if not any(isinstance(a, list) and a and a[0] == "HIRE" for a in baseline):
+            return baseline
+
+        # Midgame is deliberately almost inert: at most one $233 marginal hand
+        # can be delayed, and only during real capital pressure. DEFEND mode is
+        # allowed two expensive suppressions because the public lead is latched
+        # and the primary objective becomes preserving a buffered win.
+        daily_budget = 2 if late_defend else 1
+        if self._suppressed_today >= daily_budget:
             return baseline
 
         p = int(obs.get("player", 0) or 0)
@@ -248,6 +298,7 @@ class V33WorkGraphMind(HarvestMind):
         cash = float(farm.get("money", 0) or 0)
         hires_today = int(farm.get("hires_today", 0) or 0)
         units = 1 + len(farm.get("hands", []) or [])
+        q = len(farm.get("unlocked_quadrants", ["NW"]) or ["NW"])
 
         out = []
         kept_hires = 0
@@ -264,8 +315,25 @@ class V33WorkGraphMind(HarvestMind):
                 cash=cash,
             )
             self.last_valuations.append(valuation)
-            can_suppress = self._suppressed_today + suppressed_now < 2
-            if can_suppress and not valuation.keep:
+
+            critical_safe = valuation.reason != "critical_service_gap"
+            if late_defend:
+                candidate = (
+                    valuation.cost >= 144
+                    and valuation.robust_roi < 0.90
+                    and critical_safe
+                )
+            else:
+                capital_pressure = cash < 3500 or q < 3
+                candidate = (
+                    valuation.cost >= 233
+                    and valuation.robust_roi < 0.60
+                    and capital_pressure
+                    and critical_safe
+                )
+
+            can_suppress = self._suppressed_today + suppressed_now < daily_budget
+            if can_suppress and candidate:
                 suppressed_now += 1
                 continue
             out.append(action)

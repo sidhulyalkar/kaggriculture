@@ -1,9 +1,8 @@
 #!/usr/bin/env python3
-"""Paired both-seat screen for V33 against the exact V32 champion.
+"""Paired both-seat screen for V33 against an independently loaded control.
 
-This is intentionally a direct control test, not a replacement for the broad
-opponent-family promotion suite. Each game loads V32 into two independent
-namespaces so the champion and the champion wrapped by V33 cannot share globals.
+Production mode requires exact V32. Development mode exists only for simulator
+mechanics and activation smoke tests and is labeled unverified in the report.
 """
 from __future__ import annotations
 
@@ -14,12 +13,12 @@ import statistics
 
 from kagv2.simulator import Game
 from submission.v33_workgraph_agent import V33WorkGraphOverlay
-from scripts.build_v33_workgraph_submission import load_base_from_tar, last_callable
+from scripts.build_v33_workgraph_submission import load_base_from_tar, load_dev_base, last_callable
 
 
 def load_agent(source: str):
     env: dict = {}
-    exec(compile(source, "v32_exact.py", "exec"), env, env)
+    exec(compile(source, "control.py", "exec"), env, env)
     return last_callable(env)[1]
 
 
@@ -34,14 +33,14 @@ def run_game(source: str, seed: int, v33_seat: int) -> dict:
     agents = [v33, control] if v33_seat == 0 else [control, v33]
     money = Game(seed=seed).run(agents)
     v33_cash = float(money[v33_seat])
-    v32_cash = float(money[1 - v33_seat])
+    control_cash = float(money[1 - v33_seat])
     return {
         "seed": seed,
         "v33_seat": v33_seat,
         "v33_cash": v33_cash,
-        "v32_cash": v32_cash,
-        "margin": v33_cash - v32_cash,
-        "score": 1.0 if v33_cash > v32_cash else 0.5 if v33_cash == v32_cash else 0.0,
+        "control_cash": control_cash,
+        "margin": v33_cash - control_cash,
+        "score": 1.0 if v33_cash > control_cash else 0.5 if v33_cash == control_cash else 0.0,
         "suppressions": int(overlay.total_suppressions),
         "capital_latch": overlay.capital_latch,
         "latched_lead": overlay.latched_lead,
@@ -70,16 +69,21 @@ def summarize(rows: list[dict]) -> dict:
 
 def parse_args() -> argparse.Namespace:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--v32-tar", type=Path, required=True)
+    group = ap.add_mutually_exclusive_group(required=True)
+    group.add_argument("--v32-tar", type=Path)
+    group.add_argument("--dev-base-source", type=Path)
     ap.add_argument("--seeds", type=int, default=64)
     ap.add_argument("--seed-start", type=int, default=20260833)
-    ap.add_argument("--out", type=Path, default=Path("artifacts/v33_direct_v32.json"))
+    ap.add_argument("--out", type=Path, default=Path("artifacts/v33_direct_control.json"))
     return ap.parse_args()
 
 
 def main() -> int:
     args = parse_args()
-    source, base_meta = load_base_from_tar(args.v32_tar)
+    if args.v32_tar:
+        source, base_meta = load_base_from_tar(args.v32_tar)
+    else:
+        source, base_meta = load_dev_base(args.dev_base_source)
     rows = []
     for k in range(args.seeds):
         seed = args.seed_start + k
@@ -88,7 +92,7 @@ def main() -> int:
     report = {"base": base_meta, "summary": summarize(rows), "games": rows}
     args.out.parent.mkdir(parents=True, exist_ok=True)
     args.out.write_text(json.dumps(report, indent=2, sort_keys=True), encoding="utf-8")
-    print(json.dumps(report["summary"], indent=2, sort_keys=True))
+    print(json.dumps({"base_verified_champion": base_meta["base_verified_champion"], **report["summary"]}, indent=2, sort_keys=True))
     return 0
 
 

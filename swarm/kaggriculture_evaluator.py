@@ -1,64 +1,72 @@
 from __future__ import annotations
 
 from collections import defaultdict
-import importlib.util
+from concurrent.futures import ThreadPoolExecutor, as_completed
 import json
 import os
 from pathlib import Path
 import statistics
+import subprocess
 import sys
-import time
-from typing import Any, Callable
-from uuid import uuid4
+from typing import Any
 
+
+_REPO_ROOT = Path(__file__).resolve().parents[1]
+_CONTROL_CACHE: dict[tuple[Any, ...], list[dict[str, Any]]] = {}
+
+_WORKER = r'''
+from pathlib import Path
+import importlib.util,json,sys,time
+subject_path,opponent_path,repo_root,seed,seat=sys.argv[1],sys.argv[2],Path(sys.argv[3]),int(sys.argv[4]),int(sys.argv[5])
+sys.path[:0]=[str(repo_root),str(repo_root/'src')]
 from kagv2.simulator import Game
 
+def load(path,name):
+ p=Path(path)
+ if p.is_dir():p=p/'main.py'
+ old=list(sys.path);sys.path.insert(0,str(p.parent))
+ try:
+  spec=importlib.util.spec_from_file_location(name,str(p));m=importlib.util.module_from_spec(spec);spec.loader.exec_module(m)
+ finally:sys.path[:]=old
+ f=getattr(m,'agent',None)
+ if not callable(f):raise RuntimeError('no callable agent in '+str(p))
+ return m,f
 
-def _main_path(path: str | Path) -> Path:
-    path = Path(path)
-    return path / "main.py" if path.is_dir() else path
+def call(f,obs):
+ try:return f(obs)
+ except TypeError:return f(obs,None)
+
+def passive(obs,configuration=None):
+ return {'farmer':['PASS'],'hands':[],'market':[]}
+
+try:
+ sm,S=load(subject_path,'subject')
+ if opponent_path=='__PASSIVE__':O=passive
+ else:_,O=load(opponent_path,'opponent')
+ timings=[]
+ def timed(obs,configuration=None):
+  t=time.perf_counter()
+  try:return call(S,obs)
+  finally:timings.append(time.perf_counter()-t)
+ agents=[timed,O] if seat==0 else [O,timed]
+ money=Game(seed=seed).run(agents);sc,oc=(money[0],money[1]) if seat==0 else (money[1],money[0])
+ stats=getattr(sm,'_V44_STATS',{}) or {};calls=max(1,int(stats.get('calls',0) or 0))
+ physical=float(stats.get('physical_changed',0) or 0)/calls if stats else 1.0
+ print(json.dumps({'ok':True,'cash':float(sc),'opp_cash':float(oc),'score':1.0 if sc>oc else .5 if sc==oc else 0.0,'margin':float(sc-oc),'mean_ms':1000*sum(timings)/max(1,len(timings)),'physical_change_rate':physical}))
+except BaseException as exc:
+ print(json.dumps({'ok':False,'error':repr(exc),'mean_ms':0.0,'physical_change_rate':1.0}))
+'''
 
 
-def _load_agent(path: str | Path, module_name: str) -> tuple[Any, Callable[..., Any]]:
-    path = _main_path(path)
-    if not path.exists():
-        raise FileNotFoundError(path)
-    spec = importlib.util.spec_from_file_location(module_name, str(path))
-    if spec is None or spec.loader is None:
-        raise RuntimeError(f"Cannot import {path}")
-    module = importlib.util.module_from_spec(spec)
-    old_path = list(sys.path)
-    sys.path.insert(0, str(path.parent))
-    try:
-        spec.loader.exec_module(module)
-    finally:
-        sys.path[:] = old_path
-    agent = getattr(module, "agent", None)
-    if not callable(agent):
-        raise RuntimeError(f"{path} does not expose callable agent")
-    return module, agent
-
-
-def _call(agent: Callable[..., Any], obs: Any) -> Any:
-    try:
-        return agent(obs)
-    except TypeError:
-        return agent(obs, None)
-
-
-def _passive(obs: Any, configuration: Any = None) -> dict[str, Any]:
-    del obs, configuration
-    return {"farmer": ["PASS"], "hands": [], "market": []}
+def _main_path(path: str | Path) -> str:
+    p = Path(path)
+    return str(p / "main.py" if p.is_dir() else p)
 
 
 def _opponent_paths(champion_path: str) -> dict[str, str | None]:
-    """Resolve optional family zoo from SWARM_OPPONENTS_JSON.
-
-    The variable can contain a JSON mapping or a path to one. Champion and passive
-    controls are always present, so a zero-configuration local run remains useful.
-    """
+    """Resolve optional family zoo from SWARM_OPPONENTS_JSON."""
     raw = os.environ.get("SWARM_OPPONENTS_JSON", "").strip()
-    mapping: dict[str, str | None] = {"champion": champion_path, "passive": None}
+    mapping: dict[str, str | None] = {"champion": _main_path(champion_path), "passive": None}
     if not raw:
         return mapping
     raw_path = Path(raw)
@@ -66,47 +74,42 @@ def _opponent_paths(champion_path: str) -> dict[str, str | None]:
     if not isinstance(payload, dict):
         raise ValueError("SWARM_OPPONENTS_JSON must resolve to a mapping")
     for name, path in payload.items():
-        mapping[str(name)] = str(path)
+        mapping[str(name)] = _main_path(str(path))
     return mapping
 
 
 def _run_paths(subject_path: str, opponent_path: str | None, seed: int, seat: int) -> dict[str, Any]:
-    timings: list[float] = []
-    suffix = uuid4().hex
-    subject_module, subject = _load_agent(subject_path, f"swarm_subject_{suffix}")
-    if opponent_path is None:
-        opponent = _passive
-    else:
-        _opponent_module, opponent = _load_agent(opponent_path, f"swarm_opponent_{suffix}")
-
-    def timed(obs: Any, configuration: Any = None) -> Any:
-        del configuration
-        start = time.perf_counter()
-        try:
-            return _call(subject, obs)
-        finally:
-            timings.append(time.perf_counter() - start)
-
-    agents = [timed, opponent] if seat == 0 else [opponent, timed]
+    opponent_arg = "__PASSIVE__" if opponent_path is None else opponent_path
+    timeout_s = int(os.environ.get("SWARM_GAME_TIMEOUT_S", "180"))
     try:
-        money = Game(seed=seed).run(agents)
-        subject_cash, opponent_cash = (money[0], money[1]) if seat == 0 else (money[1], money[0])
-        stats = getattr(subject_module, "_V44_STATS", {}) or {}
-        calls = max(1, int(stats.get("calls", 0) or 0))
-        physical_change_rate = (
-            float(stats.get("physical_changed", 0) or 0) / calls if stats else 1.0
+        process = subprocess.run(
+            [
+                sys.executable,
+                "-c",
+                _WORKER,
+                _main_path(subject_path),
+                opponent_arg,
+                str(_REPO_ROOT),
+                str(seed),
+                str(seat),
+            ],
+            capture_output=True,
+            text=True,
+            timeout=timeout_s,
         )
-        return {
-            "ok": True,
-            "cash": float(subject_cash),
-            "opp_cash": float(opponent_cash),
-            "score": 1.0 if subject_cash > opponent_cash else 0.5 if subject_cash == opponent_cash else 0.0,
-            "margin": float(subject_cash - opponent_cash),
-            "mean_ms": 1000.0 * sum(timings) / max(1, len(timings)),
-            "physical_change_rate": physical_change_rate,
-        }
-    except BaseException as exc:
-        return {"ok": False, "error": repr(exc), "mean_ms": 0.0, "physical_change_rate": 1.0}
+    except subprocess.TimeoutExpired:
+        return {"ok": False, "error": "timeout", "mean_ms": 0.0, "physical_change_rate": 1.0}
+    for line in reversed(process.stdout.splitlines()):
+        try:
+            return json.loads(line)
+        except json.JSONDecodeError:
+            continue
+    return {
+        "ok": False,
+        "error": (process.stderr or process.stdout)[-2000:],
+        "mean_ms": 0.0,
+        "physical_change_rate": 1.0,
+    }
 
 
 def _family_rows(
@@ -115,20 +118,36 @@ def _family_rows(
     seeds: list[int],
     both_seats: bool,
 ) -> list[dict[str, Any]]:
-    rows: list[dict[str, Any]] = []
     seats = (0, 1) if both_seats else (0,)
-    for family, opponent_path in opponents.items():
-        for seed in seeds:
-            for seat in seats:
-                rows.append(
-                    {
-                        "family": family,
-                        "seed": seed,
-                        "seat": seat,
-                        **_run_paths(subject_path, opponent_path, seed, seat),
-                    }
-                )
+    jobs = [(family, opponent, seed, seat) for family, opponent in opponents.items() for seed in seeds for seat in seats]
+    rows: list[dict[str, Any]] = []
+    workers = max(1, int(os.environ.get("SWARM_EVAL_WORKERS", "4")))
+    with ThreadPoolExecutor(max_workers=workers) as executor:
+        futures = {
+            executor.submit(_run_paths, subject_path, opponent, seed, seat): (family, seed, seat)
+            for family, opponent, seed, seat in jobs
+        }
+        for future in as_completed(futures):
+            family, seed, seat = futures[future]
+            rows.append({"family": family, "seed": seed, "seat": seat, **future.result()})
     return rows
+
+
+def _control_rows(
+    champion_path: str,
+    opponents: dict[str, str | None],
+    seeds: list[int],
+    both_seats: bool,
+) -> list[dict[str, Any]]:
+    key = (
+        _main_path(champion_path),
+        tuple(sorted((name, path or "__PASSIVE__") for name, path in opponents.items())),
+        tuple(seeds),
+        both_seats,
+    )
+    if key not in _CONTROL_CACHE:
+        _CONTROL_CACHE[key] = _family_rows(champion_path, opponents, seeds, both_seats)
+    return _CONTROL_CACHE[key]
 
 
 def _score_by_family(rows: list[dict[str, Any]]) -> dict[str, float]:
@@ -149,7 +168,7 @@ def evaluate_candidate(
 ) -> dict[str, Any]:
     opponents = _opponent_paths(champion_path)
     candidate_rows = _family_rows(candidate_path, opponents, seeds, both_seats)
-    champion_rows = _family_rows(champion_path, opponents, seeds, both_seats)
+    champion_rows = _control_rows(champion_path, opponents, seeds, both_seats)
     champion_key = {(r["family"], r["seed"], r["seat"]): r for r in champion_rows if r.get("ok")}
 
     paired_deltas: list[float] = []

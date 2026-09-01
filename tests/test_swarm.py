@@ -5,6 +5,7 @@ import pytest
 
 from swarm.builder import extract_main_py, materialize_candidate
 from swarm.config_loader import validate_config
+from swarm.evaluate_epoch import _submission_slots
 from swarm.kaggriculture_evaluator import smoke_candidate
 from swarm.models import EvaluationRecord, ExperimentClaim
 from swarm.parser import parse_claim
@@ -172,10 +173,23 @@ def test_promotion_requires_every_gate_and_supports_lane_override():
     assert promotion_decision(architectural, thresholds, lane="architecture").promote
 
 
-def test_cash_gates_reject_binary_win_improvement_that_loses_terminal_cash():
-    evaluation = EvaluationRecord(
-        evaluation_id="cash-e1",
-        candidate_id="cash-c1",
+def test_score_first_gate_allows_small_cash_regression_but_rejects_win_regression():
+    thresholds = {
+        "min_paired_score_delta": 0.02,
+        "min_worst_family_delta": -0.05,
+        "min_paired_cash_delta": -5000.0,
+        "min_median_paired_cash_delta": -2500.0,
+        "min_paired_cash_relative_delta": -0.05,
+        "min_worst_family_cash_delta": -10000.0,
+        "min_worst_family_cash_relative_delta": -0.15,
+        "min_passive_cash_ratio": 0.95,
+        "max_invalid_games": 0,
+        "max_mean_call_ms": 100.0,
+        "max_physical_divergence": 0.02,
+    }
+    winner = EvaluationRecord(
+        evaluation_id="score-e1",
+        candidate_id="score-c1",
         stage="heldout",
         mean_score=0.8,
         paired_score_delta=0.10,
@@ -193,36 +207,30 @@ def test_cash_gates_reject_binary_win_improvement_that_loses_terminal_cash():
             "mean_control_cash": 50000.0,
         },
     )
-    thresholds = {
-        "min_paired_score_delta": -0.01,
-        "min_worst_family_delta": -0.05,
-        "min_paired_cash_delta": 100.0,
-        "min_median_paired_cash_delta": 0.0,
-        "min_paired_cash_relative_delta": 0.002,
-        "min_worst_family_cash_delta": -1500.0,
-        "min_worst_family_cash_relative_delta": -0.03,
-        "min_passive_cash_ratio": 0.97,
-        "max_invalid_games": 0,
-        "max_mean_call_ms": 100.0,
-        "max_physical_divergence": 0.02,
-    }
-    decision = promotion_decision(evaluation, thresholds)
-    assert not decision.promote
-    assert "failed paired cash delta" in decision.reasons
-    assert "failed median paired cash delta" in decision.reasons
+    assert promotion_decision(winner, thresholds).promote
 
-    profitable = EvaluationRecord(
+    cash_rich_loser = EvaluationRecord(
         **{
-            **evaluation.__dict__,
+            **winner.__dict__,
+            "candidate_id": "score-c2",
+            "paired_score_delta": -0.05,
             "metadata": {
-                **evaluation.metadata,
-                "paired_cash_delta": 500.0,
-                "median_paired_cash_delta": 300.0,
-                "paired_cash_relative_delta": 0.01,
+                **winner.metadata,
+                "paired_cash_delta": 5000.0,
+                "median_paired_cash_delta": 3000.0,
+                "paired_cash_relative_delta": 0.10,
             },
         }
     )
-    assert promotion_decision(profitable, thresholds).promote
+    decision = promotion_decision(cash_rich_loser, thresholds)
+    assert not decision.promote
+    assert "failed paired score delta" in decision.reasons
+
+
+def test_submission_slots_supports_current_and_legacy_config_shapes():
+    assert _submission_slots({"submission_slots": ["champion", "robust"]}) == ["champion", "robust"]
+    assert _submission_slots({"submission_portfolio": {"slots": ["counter"]}}) == ["counter"]
+    assert _submission_slots({}) == ["champion", "counter", "architecture", "robust", "explorer"]
 
 
 def test_config_rejects_seed_leakage():

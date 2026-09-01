@@ -7,6 +7,7 @@ from pathlib import Path
 import urllib.error
 import urllib.request
 from typing import Any
+from uuid import uuid4
 
 
 @dataclass(frozen=True)
@@ -97,28 +98,30 @@ class NvidiaNimProvider(BaseProvider):
         api_key = os.environ.get("NVIDIA_API_KEY")
         if not api_key:
             raise ProviderError("Missing environment variable NVIDIA_API_KEY")
-        body = {
+        body: dict[str, Any] = {
             "model": model,
             "messages": [
                 {"role": "system", "content": system},
                 {"role": "user", "content": prompt},
             ],
-            "temperature": 0.7,
+            "temperature": float(os.environ.get("SWARM_NVIDIA_TEMPERATURE", "0.7")),
             "top_p": 0.95,
             "max_tokens": int(os.environ.get("SWARM_NVIDIA_MAX_TOKENS", "16384")),
             "stream": False,
         }
+        if "nemotron" in model:
+            body["chat_template_kwargs"] = {"enable_thinking": True}
+            body["reasoning_budget"] = int(os.environ.get("SWARM_NVIDIA_REASONING_BUDGET", "16384"))
         payload = _post_json(endpoint=self.endpoint, api_key=api_key, body=body, timeout_s=timeout_s)
         try:
-            text = payload["choices"][0]["message"]["content"]
+            message = payload["choices"][0]["message"]
+            text = message["content"]
         except (KeyError, IndexError, TypeError) as exc:
             raise ProviderError("Unexpected NVIDIA NIM response shape") from exc
-        return ProviderResponse(
-            text=str(text),
-            provider=self.name,
-            model=model,
-            metadata=dict(payload.get("usage", {})),
-        )
+        metadata = dict(payload.get("usage", {}))
+        if isinstance(message, dict) and message.get("reasoning_content"):
+            metadata["reasoning_chars"] = len(str(message["reasoning_content"]))
+        return ProviderResponse(text=str(text), provider=self.name, model=model, metadata=metadata)
 
 
 class ManualProvider(BaseProvider):
@@ -130,8 +133,7 @@ class ManualProvider(BaseProvider):
 
     def complete(self, *, model: str, system: str, prompt: str, timeout_s: int) -> ProviderResponse:
         del timeout_s
-        index = len(list(self.outbox.glob("*.json")))
-        path = self.outbox / f"request_{index:04d}.json"
+        path = self.outbox / f"request_{uuid4().hex}.json"
         path.write_text(
             json.dumps({"model": model, "system": system, "prompt": prompt}, indent=2),
             encoding="utf-8",

@@ -112,10 +112,13 @@ def _compact_packet(slate: dict[str, Any], public_meta: dict[str, Any], auth_met
 
 def run(slate_path: str | Path, output_path: str | Path) -> dict[str, Any]:
     slate_path = Path(slate_path)
-    root = slate_path.parent
     slate = json.loads(slate_path.read_text(encoding="utf-8"))
-    public_meta = json.loads((root / "mirror" / "public" / "PUBLIC_META.json").read_text(encoding="utf-8"))
-    auth_path = root / "mirror" / "authenticated" / "AUTH_META.json"
+    mirror = slate.get("mirror") or {}
+    public_path = Path(str((mirror.get("public") or {}).get("path", "")))
+    auth_path = Path(str((mirror.get("authenticated") or {}).get("path", "")))
+    if not public_path.exists():
+        raise FileNotFoundError(f"public mirror evidence missing: {public_path}")
+    public_meta = json.loads(public_path.read_text(encoding="utf-8"))
     auth_meta = json.loads(auth_path.read_text(encoding="utf-8")) if auth_path.exists() else None
     packet = _compact_packet(slate, public_meta, auth_meta)
 

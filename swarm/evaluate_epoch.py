@@ -97,6 +97,9 @@ def evaluate_epoch(
 
     slots = list(config["submission_portfolio"]["slots"])
     portfolio = select_portfolio(heldout_objects, promoted_ids, slots)
+    if not portfolio.get("champion"):
+        portfolio["champion"] = "CURRENT_CHAMPION"
+
     summary = {
         "candidate_count": len(candidates),
         "screen_survivors": len(survivors),

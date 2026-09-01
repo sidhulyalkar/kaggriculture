@@ -1,13 +1,8 @@
 {
   "enabled": true,
-  "request_id": "epoch0-nvidia-scout-local-control-002",
-  "mode": "epoch",
+  "request_id": "frontier-acquisition-probe-001",
+  "mode": "frontier_probe",
   "config": "swarm/config/nvidia_verified.yaml",
-  "champion_path": "submission",
-  "opponents": {
-    "repo_baseline_v1": "baselines/v1"
-  },
-  "max_tokens": 20000,
-  "provider_attempts": 2,
-  "temperature": 0.35
+  "frontier_keys": ["v32", "strict", "barnyard", "weedslip", "moon", "soil"],
+  "provider_attempts": 1
 }

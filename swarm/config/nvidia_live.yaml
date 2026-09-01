@@ -1,0 +1,134 @@
+version: 1
+name: v45-nvidia-live-scout
+
+frontier:
+  branch: agent/v44-frontier-margin-engine
+  champion_policy: CURRENT_QUALIFIED_CHAMPION
+  preserve_champion: true
+
+budget:
+  frontier_improvement: 0.30
+  counter_policy: 0.25
+  architecture: 0.20
+  mechanism: 0.15
+  weird: 0.10
+
+providers:
+  default_timeout_s: 900
+  max_parallel_requests: 4
+  models:
+    chief_scientist:
+      provider: nvidia
+      model: nvidia/nemotron-3-ultra-550b-a55b
+    architect:
+      provider: nvidia
+      model: moonshotai/kimi-k3
+    adversary:
+      provider: nvidia
+      model: deepseek-ai/deepseek-v4-pro-0813
+    mechanism:
+      provider: nvidia
+      model: nvidia/nemotron-3-ultra-550b-a55b
+    residual:
+      provider: nvidia
+      model: moonshotai/kimi-k3
+    explorer:
+      provider: nvidia
+      model: nvidia/nemotron-3.5-lightning-30b-a3b
+    auditor:
+      provider: nvidia
+      model: deepseek-ai/deepseek-v4-pro-0813
+
+roles:
+  - id: architect
+    count: 1
+    lane: architecture
+    packet: blank_sheet
+    independent: true
+    build_candidate: true
+  - id: adversary
+    count: 1
+    lane: counter_policy
+    packet: champion_counter
+    independent: true
+    build_candidate: true
+  - id: mechanism
+    count: 1
+    lane: mechanism
+    packet: trace_mechanism
+    independent: true
+    build_candidate: true
+  - id: residual
+    count: 1
+    lane: frontier_improvement
+    packet: frontier_residual
+    independent: true
+    build_candidate: true
+  - id: explorer
+    count: 1
+    lane: weird
+    packet: open_exploration
+    independent: true
+    build_candidate: true
+  - id: auditor
+    count: 1
+    lane: audit
+    packet: evidence_only
+    independent: true
+    build_candidate: false
+
+council:
+  reviewers:
+    - chief_scientist
+    - auditor
+    - mechanism
+  research_feedback_boundary: screen_only
+
+experiments:
+  screen:
+    seeds: [101, 103, 107, 109]
+    both_seats: true
+    max_candidates_per_role: 2
+  heldout:
+    seeds: [211, 223, 227, 229, 233, 239]
+    both_seats: true
+    sealed: true
+  promotion:
+    min_paired_score_delta: 0.02
+    min_worst_family_delta: -0.03
+    min_passive_cash_ratio: 0.97
+    max_invalid_games: 0
+    max_mean_call_ms: 100.0
+    max_physical_divergence: 0.02
+    lane_overrides:
+      architecture:
+        max_physical_divergence: 1.0
+        min_passive_cash_ratio: 0.90
+      counter_policy:
+        max_physical_divergence: 1.0
+        min_passive_cash_ratio: 0.90
+      weird:
+        max_physical_divergence: 1.0
+        min_passive_cash_ratio: 0.90
+      mechanism:
+        max_physical_divergence: 0.10
+
+novelty:
+  minimum_behavioral_distance: 0.03
+  duplicate_code_similarity: 0.97
+  cluster_cap: 3
+
+information_release:
+  rounds:
+    - independent_discovery
+    - mechanism_hint
+    - causal_summary
+    - implementation_share
+
+submission_portfolio:
+  slots:
+    - champion
+    - counter
+    - architecture
+    - robust
+    - explorer

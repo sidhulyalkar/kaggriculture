@@ -1,3 +1,4 @@
+import http.client
 from pathlib import Path
 
 import pytest
@@ -8,6 +9,7 @@ from swarm.kaggriculture_evaluator import smoke_candidate
 from swarm.models import EvaluationRecord, ExperimentClaim
 from swarm.parser import parse_claim
 from swarm.promotion import promotion_decision
+from swarm.providers import ProviderError, _post_json, _retryable_provider_error
 from swarm.run_epoch import _read_agent_bundle
 from swarm.safety import check_source
 
@@ -119,6 +121,23 @@ def test_runtime_smoke_accepts_minimal_passive_agent(tmp_path: Path):
     assert smoke["ok"]
     assert smoke["invalid_games"] == 0
     assert len(smoke["rows"]) == 2
+
+
+def test_remote_disconnect_is_wrapped_as_retryable_provider_error(monkeypatch):
+    def disconnect(*args, **kwargs):
+        raise http.client.RemoteDisconnected("Remote end closed connection without response")
+
+    monkeypatch.setattr("swarm.providers.urllib.request.urlopen", disconnect)
+    with pytest.raises(ProviderError) as caught:
+        _post_json(
+            endpoint="https://example.invalid/v1/chat",
+            api_key="not-a-real-key",
+            body={"hello": "world"},
+            timeout_s=1,
+        )
+    assert caught.value.retryable
+    assert _retryable_provider_error(caught.value)
+    assert "RemoteDisconnected" in str(caught.value)
 
 
 def test_promotion_requires_every_gate_and_supports_lane_override():

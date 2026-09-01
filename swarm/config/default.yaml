@@ -2,8 +2,8 @@ version: 1
 name: v45-autonomous-swarm
 
 frontier:
-  branch: agent/v44-frontier-margin-engine
-  champion_policy: V44_COMPILED_CONTROL
+  harness_branch: agent/v44-frontier-margin-engine
+  champion_policy: CURRENT_QUALIFIED_CHAMPION
   preserve_champion: true
 
 budget:

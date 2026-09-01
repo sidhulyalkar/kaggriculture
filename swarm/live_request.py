@@ -29,6 +29,15 @@ def _tree_hash(path: str | Path) -> str:
     return digest.hexdigest()
 
 
+def _configure_provider_runtime(request: dict[str, Any]) -> None:
+    attempts = int(request.get("provider_attempts", 2))
+    if attempts < 1 or attempts > 5:
+        raise ValueError("provider_attempts must be between 1 and 5")
+    os.environ["SWARM_NVIDIA_ATTEMPTS"] = str(attempts)
+    if "temperature" in request:
+        os.environ["SWARM_NVIDIA_TEMPERATURE"] = str(float(request["temperature"]))
+
+
 def execute_request(*, request_path: str, output_root: str) -> dict[str, Any]:
     request = json.loads(Path(request_path).read_text(encoding="utf-8"))
     if not bool(request.get("enabled", False)):
@@ -38,7 +47,13 @@ def execute_request(*, request_path: str, output_root: str) -> dict[str, Any]:
     config_path = str(request.get("config", "swarm/config/nvidia_live.yaml"))
     root = Path(output_root).resolve()
     root.mkdir(parents=True, exist_ok=True)
-    result: dict[str, Any] = {"request_id": request_id, "mode": mode, "config": config_path}
+    _configure_provider_runtime(request)
+    result: dict[str, Any] = {
+        "request_id": request_id,
+        "mode": mode,
+        "config": config_path,
+        "provider_attempts": int(os.environ["SWARM_NVIDIA_ATTEMPTS"]),
+    }
 
     if mode == "probe":
         os.environ["SWARM_NVIDIA_MAX_TOKENS"] = str(int(request.get("max_tokens", 128)))

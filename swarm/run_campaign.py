@@ -39,6 +39,7 @@ def run_campaign(
             dry_run=dry_run,
             feedback_path=feedback_path,
             round_index=index,
+            champion_path=champion_path,
         )
         row: dict[str, object] = {"round": index, "epoch": str(epoch)}
         if dry_run:

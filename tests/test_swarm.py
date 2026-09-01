@@ -1,5 +1,3 @@
-from pathlib import Path
-
 import pytest
 
 from swarm.builder import extract_main_py
@@ -45,7 +43,24 @@ def test_static_check_rejects_network_import():
     assert any("forbidden import" in error for error in result.errors)
 
 
-def test_promotion_requires_every_gate():
+def test_static_check_allows_recursively_safe_embedded_parent():
+    parent = "def parent(obs, cfg=None):\n    return {}\n"
+    source = f"PARENT = {parent!r}\nexec(compile(PARENT, '<parent>', 'exec'))\ndef agent(obs, cfg=None):\n    return parent(obs, cfg)\n"
+    assert check_source(source).ok
+
+
+def test_static_check_rejects_dynamic_or_unsafe_embedded_code():
+    dynamic = "code = input()\nexec(code)\ndef agent(obs, cfg=None):\n    return {}\n"
+    assert not check_source(dynamic).ok
+
+    unsafe_parent = "import subprocess\ndef parent(obs, cfg=None):\n    return {}\n"
+    source = f"PARENT = {unsafe_parent!r}\nexec(PARENT)\ndef agent(obs, cfg=None):\n    return parent(obs, cfg)\n"
+    result = check_source(source)
+    assert not result.ok
+    assert any("subprocess" in error for error in result.errors)
+
+
+def test_promotion_requires_every_gate_and_supports_lane_override():
     evaluation = EvaluationRecord(
         evaluation_id="e1",
         candidate_id="c1",
@@ -65,11 +80,16 @@ def test_promotion_requires_every_gate():
         "max_invalid_games": 0,
         "max_mean_call_ms": 100.0,
         "max_physical_divergence": 0.02,
+        "lane_overrides": {"architecture": {"max_physical_divergence": 1.0}},
     }
     assert promotion_decision(evaluation, thresholds).promote
 
     bad = EvaluationRecord(**{**evaluation.__dict__, "invalid_games": 1})
     assert not promotion_decision(bad, thresholds).promote
+
+    architectural = EvaluationRecord(**{**evaluation.__dict__, "physical_divergence": 0.9})
+    assert not promotion_decision(architectural, thresholds).promote
+    assert promotion_decision(architectural, thresholds, lane="architecture").promote
 
 
 def test_config_rejects_seed_leakage():

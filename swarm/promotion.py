@@ -48,6 +48,8 @@ def promotion_decision(
         (evaluation.physical_divergence <= float(gate["max_physical_divergence"]), "physical divergence"),
     ]
 
+    # Cash is a safety/causal diagnostic, not the leaderboard objective. Optional
+    # cash thresholds therefore act only as collapse guards around a score-first gate.
     cash_checks = (
         ("min_paired_cash_delta", "paired_cash_delta", "paired cash delta"),
         ("min_median_paired_cash_delta", "median_paired_cash_delta", "median paired cash delta"),
@@ -70,21 +72,20 @@ def promotion_decision(
 
     paired_cash_relative = _cash_metric(evaluation, "paired_cash_relative_delta", 0.0)
     worst_cash_relative = _cash_metric(evaluation, "worst_family_cash_relative_delta", 0.0)
-    median_cash = _cash_metric(evaluation, "median_paired_cash_delta", 0.0)
-    cash_scale = max(1.0, abs(_cash_metric(evaluation, "mean_control_cash", 1.0)))
 
-    # Ranking is cash-first because the engine's terminal reward is bank cash.
-    # Promotion still requires every hard gate above.
+    # Kaggle simulation rating is driven by episode outcomes, so candidate ranking
+    # is score-first. Cash contributes a small diagnostic term and cannot rescue a
+    # candidate that fails the paired win-rate gates above.
     score = (
-        1.00 * paired_cash_relative
-        + 0.35 * worst_cash_relative
-        + 0.10 * (median_cash / cash_scale)
-        + 0.10 * evaluation.paired_score_delta
-        + 0.05 * evaluation.worst_family_delta
-        + 0.05 * (evaluation.passive_cash_ratio - 1.0)
+        1.00 * evaluation.paired_score_delta
+        + 0.45 * evaluation.worst_family_delta
+        + 0.10 * (evaluation.mean_score - 0.5)
+        + 0.03 * paired_cash_relative
+        + 0.02 * worst_cash_relative
+        + 0.03 * (evaluation.passive_cash_ratio - 1.0)
         - 0.001 * evaluation.invalid_games
         - 0.001 * max(0.0, evaluation.mean_call_ms - 25.0)
-        - 0.05 * evaluation.physical_divergence
+        - 0.03 * evaluation.physical_divergence
     )
     return PromotionDecision(
         candidate_id=evaluation.candidate_id,
@@ -103,17 +104,19 @@ def select_portfolio(
     by_mean = sorted(
         eligible,
         key=lambda row: (
-            _cash_metric(row, "paired_cash_relative_delta", float("-inf")),
-            _cash_metric(row, "paired_cash_delta", float("-inf")),
+            row.paired_score_delta,
+            row.worst_family_delta,
             row.mean_score,
+            _cash_metric(row, "paired_cash_relative_delta", float("-inf")),
         ),
         reverse=True,
     )
     by_robust = sorted(
         eligible,
         key=lambda row: (
+            row.worst_family_delta,
+            row.paired_score_delta,
             _cash_metric(row, "worst_family_cash_relative_delta", float("-inf")),
-            _cash_metric(row, "worst_family_cash_delta", float("-inf")),
         ),
         reverse=True,
     )

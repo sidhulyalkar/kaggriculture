@@ -172,6 +172,59 @@ def test_promotion_requires_every_gate_and_supports_lane_override():
     assert promotion_decision(architectural, thresholds, lane="architecture").promote
 
 
+def test_cash_gates_reject_binary_win_improvement_that_loses_terminal_cash():
+    evaluation = EvaluationRecord(
+        evaluation_id="cash-e1",
+        candidate_id="cash-c1",
+        stage="heldout",
+        mean_score=0.8,
+        paired_score_delta=0.10,
+        worst_family_delta=0.0,
+        passive_cash_ratio=1.01,
+        invalid_games=0,
+        mean_call_ms=10.0,
+        physical_divergence=0.01,
+        metadata={
+            "paired_cash_delta": -250.0,
+            "median_paired_cash_delta": -50.0,
+            "paired_cash_relative_delta": -0.004,
+            "worst_family_cash_delta": -500.0,
+            "worst_family_cash_relative_delta": -0.01,
+            "mean_control_cash": 50000.0,
+        },
+    )
+    thresholds = {
+        "min_paired_score_delta": -0.01,
+        "min_worst_family_delta": -0.05,
+        "min_paired_cash_delta": 100.0,
+        "min_median_paired_cash_delta": 0.0,
+        "min_paired_cash_relative_delta": 0.002,
+        "min_worst_family_cash_delta": -1500.0,
+        "min_worst_family_cash_relative_delta": -0.03,
+        "min_passive_cash_ratio": 0.97,
+        "max_invalid_games": 0,
+        "max_mean_call_ms": 100.0,
+        "max_physical_divergence": 0.02,
+    }
+    decision = promotion_decision(evaluation, thresholds)
+    assert not decision.promote
+    assert "failed paired cash delta" in decision.reasons
+    assert "failed median paired cash delta" in decision.reasons
+
+    profitable = EvaluationRecord(
+        **{
+            **evaluation.__dict__,
+            "metadata": {
+                **evaluation.metadata,
+                "paired_cash_delta": 500.0,
+                "median_paired_cash_delta": 300.0,
+                "paired_cash_relative_delta": 0.01,
+            },
+        }
+    )
+    assert promotion_decision(profitable, thresholds).promote
+
+
 def test_config_rejects_seed_leakage():
     config = {
         "budget": {"a": 1.0},

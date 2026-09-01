@@ -1,8 +1,13 @@
 {
   "enabled": true,
-  "request_id": "epoch0-nvidia-reprobe-002",
-  "mode": "probe",
-  "config": "swarm/config/nvidia_live.yaml",
-  "max_tokens": 64,
-  "timeout_s": 120
+  "request_id": "epoch0-nvidia-scout-local-control-001",
+  "mode": "epoch",
+  "config": "swarm/config/nvidia_verified.yaml",
+  "champion_path": "submission",
+  "opponents": {
+    "repo_baseline_v1": "baselines/v1"
+  },
+  "max_tokens": 20000,
+  "provider_attempts": 2,
+  "temperature": 0.35
 }

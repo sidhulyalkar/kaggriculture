@@ -209,6 +209,14 @@ def _score_by_family(rows: list[dict[str, Any]]) -> dict[str, float]:
     return {family: statistics.mean(scores) for family, scores in grouped.items() if scores}
 
 
+def _cash_by_family(rows: list[dict[str, Any]]) -> dict[str, float]:
+    grouped: dict[str, list[float]] = defaultdict(list)
+    for row in rows:
+        if row.get("ok"):
+            grouped[str(row["family"])].append(float(row["cash"]))
+    return {family: statistics.mean(values) for family, values in grouped.items() if values}
+
+
 def evaluate_candidate(
     *,
     candidate_path: str,
@@ -228,25 +236,51 @@ def evaluate_candidate(
     champion_rows = _control_rows(champion_path, opponents, seeds, both_seats)
     champion_key = {(r["family"], r["seed"], r["seat"]): r for r in champion_rows if r.get("ok")}
 
-    paired_deltas: list[float] = []
-    family_deltas: dict[str, list[float]] = defaultdict(list)
+    paired_score_deltas: list[float] = []
+    paired_cash_deltas: list[float] = []
+    paired_cash_relative_deltas: list[float] = []
+    family_score_deltas: dict[str, list[float]] = defaultdict(list)
+    family_cash_deltas: dict[str, list[float]] = defaultdict(list)
+    family_cash_relative_deltas: dict[str, list[float]] = defaultdict(list)
     for row in candidate_rows:
         if not row.get("ok"):
             continue
-        control = champion_key.get((row["family"], row["seed"], row["seat"]))
+        family = str(row["family"])
+        control = champion_key.get((family, row["seed"], row["seat"]))
         if not control:
             continue
-        delta = float(row["score"]) - float(control["score"])
-        paired_deltas.append(delta)
-        family_deltas[str(row["family"])].append(delta)
+        score_delta = float(row["score"]) - float(control["score"])
+        cash_delta = float(row["cash"]) - float(control["cash"])
+        relative_cash_delta = cash_delta / max(1.0, abs(float(control["cash"])))
+        family_score_deltas[family].append(score_delta)
+        family_cash_deltas[family].append(cash_delta)
+        family_cash_relative_deltas[family].append(relative_cash_delta)
+        if family != "passive":
+            paired_score_deltas.append(score_delta)
+            paired_cash_deltas.append(cash_delta)
+            paired_cash_relative_deltas.append(relative_cash_delta)
 
     competitive_candidate = [r for r in candidate_rows if r.get("ok") and r["family"] != "passive"]
+    competitive_control = [r for r in champion_rows if r.get("ok") and r["family"] != "passive"]
     candidate_family_scores = _score_by_family(competitive_candidate)
-    mean_family_deltas = {
+    candidate_family_cash = _cash_by_family(competitive_candidate)
+    control_family_cash = _cash_by_family(competitive_control)
+    mean_family_score_deltas = {
         family: statistics.mean(values)
-        for family, values in family_deltas.items()
+        for family, values in family_score_deltas.items()
         if family != "passive" and values
     }
+    mean_family_cash_deltas = {
+        family: statistics.mean(values)
+        for family, values in family_cash_deltas.items()
+        if family != "passive" and values
+    }
+    mean_family_cash_relative_deltas = {
+        family: statistics.mean(values)
+        for family, values in family_cash_relative_deltas.items()
+        if family != "passive" and values
+    }
+
     passive_candidate = [float(r["cash"]) for r in candidate_rows if r.get("ok") and r["family"] == "passive"]
     passive_champion = [float(r["cash"]) for r in champion_rows if r.get("ok") and r["family"] == "passive"]
     passive_ratio = (
@@ -261,16 +295,25 @@ def evaluate_candidate(
     physical_divergence = statistics.mean(physical_values) if physical_values else 1.0
     shadow_calls = sum(int(row.get("shadow_calls", 0)) for row in candidate_rows if row.get("ok"))
     fingerprint = tuple(candidate_family_scores[name] for name in sorted(candidate_family_scores))
-    worst_family_delta = min(mean_family_deltas.values(), default=-1.0)
-    target_family = max(mean_family_deltas, key=mean_family_deltas.get) if mean_family_deltas else None
-    target_family_gain = mean_family_deltas.get(target_family, -1.0) if target_family else -1.0
+    worst_family_score_delta = min(mean_family_score_deltas.values(), default=-1.0)
+    worst_family_cash_delta = min(mean_family_cash_deltas.values(), default=float("-inf"))
+    worst_family_cash_relative_delta = min(mean_family_cash_relative_deltas.values(), default=float("-inf"))
+    target_family = max(mean_family_cash_deltas, key=mean_family_cash_deltas.get) if mean_family_cash_deltas else None
+    target_family_gain = mean_family_cash_deltas.get(target_family, float("-inf")) if target_family else float("-inf")
     mean_score = statistics.mean(float(r["score"]) for r in competitive_candidate) if competitive_candidate else 0.0
+    mean_cash = statistics.mean(float(r["cash"]) for r in competitive_candidate) if competitive_candidate else 0.0
+    mean_control_cash = statistics.mean(float(r["cash"]) for r in competitive_control) if competitive_control else 0.0
+    paired_cash_delta = statistics.mean(paired_cash_deltas) if paired_cash_deltas else float("-inf")
+    median_paired_cash_delta = statistics.median(paired_cash_deltas) if paired_cash_deltas else float("-inf")
+    paired_cash_relative_delta = (
+        statistics.mean(paired_cash_relative_deltas) if paired_cash_relative_deltas else float("-inf")
+    )
 
     return {
         "evaluation_id": f"{Path(candidate_path).parent.name}-{stage}",
         "mean_score": mean_score,
-        "paired_score_delta": statistics.mean(paired_deltas) if paired_deltas else -1.0,
-        "worst_family_delta": worst_family_delta,
+        "paired_score_delta": statistics.mean(paired_score_deltas) if paired_score_deltas else -1.0,
+        "worst_family_delta": worst_family_score_delta,
         "passive_cash_ratio": passive_ratio,
         "invalid_games": invalid_games,
         "mean_call_ms": statistics.mean(mean_ms_values) if mean_ms_values else float("inf"),
@@ -278,12 +321,24 @@ def evaluate_candidate(
         "behavioral_fingerprint": list(fingerprint),
         "metadata": {
             "stage": stage,
+            "terminal_metric": "bank_cash",
             "families": sorted(opponents),
             "family_scores": candidate_family_scores,
-            "family_deltas": mean_family_deltas,
+            "family_score_deltas": mean_family_score_deltas,
+            "family_cash": candidate_family_cash,
+            "control_family_cash": control_family_cash,
+            "family_cash_deltas": mean_family_cash_deltas,
+            "family_cash_relative_deltas": mean_family_cash_relative_deltas,
+            "mean_cash": mean_cash,
+            "mean_control_cash": mean_control_cash,
+            "paired_cash_delta": paired_cash_delta,
+            "median_paired_cash_delta": median_paired_cash_delta,
+            "paired_cash_relative_delta": paired_cash_relative_delta,
+            "worst_family_cash_delta": worst_family_cash_delta,
+            "worst_family_cash_relative_delta": worst_family_cash_relative_delta,
             "target_family": target_family,
             "target_family_gain": target_family_gain,
-            "paired_games": len(paired_deltas),
+            "paired_games": len(paired_cash_deltas),
             "game_count": len(candidate_rows),
             "shadow_control_calls": shadow_calls,
             "physical_divergence_method": "same-observation-shadow-control",

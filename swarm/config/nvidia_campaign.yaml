@@ -87,38 +87,39 @@ experiments:
   screen:
     seeds: [101, 103, 107, 109]
     both_seats: true
-    min_paired_score_delta: -0.05
-    min_paired_cash_delta: -1000.0
-    min_paired_cash_relative_delta: -0.02
+    # The leaderboard reward is the episode outcome. Cash is only a broad
+    # economic collapse guard so a narrow-margin winner is not screened out.
+    min_paired_score_delta: -0.02
+    min_paired_cash_delta: -7500.0
+    min_paired_cash_relative_delta: -0.10
   heldout:
     seeds: [211, 223, 227, 229, 233, 239]
     both_seats: true
     sealed: true
   promotion:
-    # Bank cash is the engine's terminal reward. Win/loss is retained only as a
-    # secondary robustness gate because profitable improvements need not flip a
-    # binary matchup on every seed.
-    min_paired_score_delta: -0.01
+    # Promote for repeatable win-probability uplift. Cash protects against a
+    # structurally broken policy but does not need to improve for promotion.
+    min_paired_score_delta: 0.02
     min_worst_family_delta: -0.05
-    min_paired_cash_delta: 100.0
-    min_median_paired_cash_delta: 0.0
-    min_paired_cash_relative_delta: 0.002
-    min_worst_family_cash_delta: -1500.0
-    min_worst_family_cash_relative_delta: -0.03
-    min_passive_cash_ratio: 0.97
+    min_paired_cash_delta: -5000.0
+    min_median_paired_cash_delta: -2500.0
+    min_paired_cash_relative_delta: -0.05
+    min_worst_family_cash_delta: -10000.0
+    min_worst_family_cash_relative_delta: -0.15
+    min_passive_cash_ratio: 0.95
     max_invalid_games: 0
     max_mean_call_ms: 100.0
     max_physical_divergence: 0.02
     lane_overrides:
       architecture:
         max_physical_divergence: 1.0
-        min_passive_cash_ratio: 0.90
+        min_passive_cash_ratio: 0.85
       counter_policy:
         max_physical_divergence: 1.0
-        min_passive_cash_ratio: 0.90
+        min_passive_cash_ratio: 0.85
       weird:
         max_physical_divergence: 1.0
-        min_passive_cash_ratio: 0.90
+        min_passive_cash_ratio: 0.85
       mechanism:
         max_physical_divergence: 0.10
 

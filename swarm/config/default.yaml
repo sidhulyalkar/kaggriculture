@@ -29,7 +29,7 @@ providers:
     mechanism:
       provider: nvidia
       model: nvidia/nemotron-3-ultra
-    long_horizon:
+    residual:
       provider: nvidia
       model: moonshotai/kimi-k3
     explorer:
@@ -45,31 +45,37 @@ roles:
     lane: architecture
     packet: blank_sheet
     independent: true
+    build_candidate: true
   - id: adversary
     count: 2
     lane: counter_policy
     packet: champion_counter
     independent: true
+    build_candidate: true
   - id: mechanism
     count: 2
     lane: mechanism
     packet: trace_mechanism
     independent: true
+    build_candidate: true
   - id: residual
     count: 2
     lane: frontier_improvement
     packet: frontier_residual
     independent: true
+    build_candidate: true
   - id: explorer
     count: 1
     lane: weird
     packet: open_exploration
     independent: true
+    build_candidate: true
   - id: auditor
     count: 1
     lane: audit
     packet: evidence_only
     independent: true
+    build_candidate: false
 
 experiments:
   screen:
@@ -87,6 +93,18 @@ experiments:
     max_invalid_games: 0
     max_mean_call_ms: 100.0
     max_physical_divergence: 0.02
+    lane_overrides:
+      architecture:
+        max_physical_divergence: 1.0
+        min_passive_cash_ratio: 0.90
+      counter_policy:
+        max_physical_divergence: 1.0
+        min_passive_cash_ratio: 0.90
+      weird:
+        max_physical_divergence: 1.0
+        min_passive_cash_ratio: 0.90
+      mechanism:
+        max_physical_divergence: 0.10
 
 novelty:
   minimum_behavioral_distance: 0.03

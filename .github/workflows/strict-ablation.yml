@@ -1,0 +1,67 @@
+name: Strict Cash Ablation
+
+on:
+  push:
+    branches:
+      - agent/v45-autonomous-swarm-lab
+    paths:
+      - 'swarm_requests/STRICT_ABLATION.json'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: strict-cash-ablation-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    env:
+      PYTHONUNBUFFERED: '1'
+      SWARM_EVAL_WORKERS: '4'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: python -m pip install --upgrade pip
+      - name: Install simulator and public-frontier client
+        run: pip install -e . 'kagglehub==1.0.2'
+      - name: Run deterministic Strict cash ablation
+        shell: bash
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          from swarm.strict_ablation import run_ablation
+          request = json.loads(Path('swarm_requests/STRICT_ABLATION.json').read_text())
+          if not request.get('enabled', False):
+              raise SystemExit('Strict ablation request is disabled')
+          result = run_ablation(output_root='/tmp/strict-ablation')
+          print(json.dumps({k: result.get(k) for k in ('decision','winner','archive','reason')}, indent=2, sort_keys=True))
+          PY
+      - name: Verify promoted archive contract
+        if: always()
+        shell: bash
+        run: |
+          archive=$(find /tmp/strict-ablation/submission -name 'NEXT_SUBMIT_STRICT_ABLATION_*.tar.gz' -print -quit 2>/dev/null || true)
+          if [ -n "$archive" ]; then
+            python scripts/check_submission.py "$archive"
+          else
+            echo 'No Strict variant promoted; HOLD is a valid scientific outcome.'
+          fi
+      - name: Summarize result tree
+        if: always()
+        shell: bash
+        run: find /tmp/strict-ablation -maxdepth 5 -type f -printf '%P\n' 2>/dev/null | sort | head -400 || true
+      - name: Upload Strict ablation evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: strict-cash-ablation-${{ github.run_id }}
+          path: /tmp/strict-ablation
+          if-no-files-found: warn
+          retention-days: 30

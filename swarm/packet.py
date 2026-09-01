@@ -19,7 +19,8 @@ PACKET_FILES: dict[str, tuple[str, ...]] = {
     "blank_sheet": (
         "docs/ENGINE_CONTRACT.md",
         "docs/ARCHITECTURE.md",
-        "baselines/v1/main.py",
+        "src/kagv2/simulator.py",
+        "baselines/v1",
         "docs/PUBLIC_APPROACHES_AND_STRATEGY.md",
     ),
     "champion_counter": (
@@ -40,7 +41,8 @@ PACKET_FILES: dict[str, tuple[str, ...]] = {
     "open_exploration": (
         "docs/ENGINE_CONTRACT.md",
         "docs/ARCHITECTURE.md",
-        "baselines/v1/main.py",
+        "src/kagv2/simulator.py",
+        "baselines/v1",
         "docs/PUBLIC_APPROACHES_AND_STRATEGY.md",
     ),
     "evidence_only": (
@@ -60,7 +62,27 @@ def _read_optional(repo_root: Path, relative: str) -> str:
     path = repo_root / relative
     if not path.exists():
         return f"[MISSING {relative}]"
-    return path.read_text(encoding="utf-8", errors="replace")
+    if path.is_file():
+        return path.read_text(encoding="utf-8", errors="replace")
+
+    sections: list[str] = [f"[DIRECTORY BUNDLE {relative}]"]
+    files = sorted(
+        p
+        for p in path.rglob("*")
+        if p.is_file()
+        and "__pycache__" not in p.parts
+        and p.suffix.lower() in {".py", ".json", ".md", ".txt", ".yaml", ".yml"}
+    )
+    for child in files:
+        child_relative = child.relative_to(repo_root).as_posix()
+        sections.extend(
+            (
+                "",
+                f"### BUNDLED FILE: {child_relative}",
+                child.read_text(encoding="utf-8", errors="replace"),
+            )
+        )
+    return "\n".join(sections)
 
 
 def build_packet(
@@ -83,7 +105,7 @@ def build_packet(
         json.dumps(public_context, sort_keys=True, indent=2),
     ]
     for relative in files:
-        sections.extend(("", f"## FILE: {relative}", _read_optional(repo_root, relative)))
+        sections.extend(("", f"## FILE OR BUNDLE: {relative}", _read_optional(repo_root, relative)))
     if extra_evidence.strip():
         sections.extend(("", "## ROLE-SPECIFIC EVIDENCE", extra_evidence.strip()))
 

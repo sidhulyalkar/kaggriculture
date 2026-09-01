@@ -1,0 +1,109 @@
+version: 1
+name: v45-autonomous-swarm
+
+frontier:
+  branch: agent/v44-frontier-margin-engine
+  champion_policy: V44_COMPILED_CONTROL
+  preserve_champion: true
+
+budget:
+  frontier_improvement: 0.40
+  counter_policy: 0.25
+  architecture: 0.20
+  mechanism: 0.10
+  weird: 0.05
+
+providers:
+  default_timeout_s: 900
+  max_parallel_requests: 6
+  models:
+    chief_scientist:
+      provider: openai
+      model: gpt-5.6-sol
+    architect:
+      provider: openai
+      model: gpt-5.6-sol
+    adversary:
+      provider: nvidia
+      model: deepseek-ai/deepseek-v4-pro
+    mechanism:
+      provider: nvidia
+      model: nvidia/nemotron-3-ultra
+    long_horizon:
+      provider: nvidia
+      model: moonshotai/kimi-k3
+    explorer:
+      provider: nvidia
+      model: nvidia/nemotron-3.5-lightning
+    auditor:
+      provider: nvidia
+      model: deepseek-ai/deepseek-v4-pro
+
+roles:
+  - id: architect
+    count: 2
+    lane: architecture
+    packet: blank_sheet
+    independent: true
+  - id: adversary
+    count: 2
+    lane: counter_policy
+    packet: champion_counter
+    independent: true
+  - id: mechanism
+    count: 2
+    lane: mechanism
+    packet: trace_mechanism
+    independent: true
+  - id: residual
+    count: 2
+    lane: frontier_improvement
+    packet: frontier_residual
+    independent: true
+  - id: explorer
+    count: 1
+    lane: weird
+    packet: open_exploration
+    independent: true
+  - id: auditor
+    count: 1
+    lane: audit
+    packet: evidence_only
+    independent: true
+
+experiments:
+  screen:
+    seeds: [101, 103, 107, 109]
+    both_seats: true
+    max_candidates_per_role: 4
+  heldout:
+    seeds: [211, 223, 227, 229, 233, 239]
+    both_seats: true
+    sealed: true
+  promotion:
+    min_paired_score_delta: 0.02
+    min_worst_family_delta: -0.03
+    min_passive_cash_ratio: 0.97
+    max_invalid_games: 0
+    max_mean_call_ms: 100.0
+    max_physical_divergence: 0.02
+
+novelty:
+  minimum_behavioral_distance: 0.03
+  duplicate_code_similarity: 0.97
+  cluster_cap: 3
+
+information_release:
+  rounds:
+    - independent_discovery
+    - mechanism_hint
+    - causal_summary
+    - implementation_share
+
+submission_portfolio:
+  slots:
+    - champion
+    - counter
+    - architecture
+    - robust
+    - explorer

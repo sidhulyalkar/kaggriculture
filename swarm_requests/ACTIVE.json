@@ -1,8 +1,8 @@
 {
   "enabled": true,
-  "request_id": "frontier-acquisition-probe-001",
+  "request_id": "frontier-crossplay-probe-002",
   "mode": "frontier_probe",
-  "config": "swarm/config/nvidia_verified.yaml",
+  "config": "swarm/config/nvidia_campaign.yaml",
   "frontier_keys": ["v32", "strict", "barnyard", "weedslip", "moon", "soil"],
   "provider_attempts": 1
 }

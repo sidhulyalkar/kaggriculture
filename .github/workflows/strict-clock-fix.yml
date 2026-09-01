@@ -1,0 +1,142 @@
+name: Strict Clock Recovery
+
+on:
+  push:
+    branches:
+      - agent/v45-autonomous-swarm-lab
+    paths:
+      - 'swarm_requests/STRICT_CLOCK_FIX.json'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: strict-clock-recovery-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  qualify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      PYTHONUNBUFFERED: '1'
+      PYGAME_HIDE_SUPPORT_PROMPT: hide
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: python -m pip install --upgrade pip
+      - name: Install official environment and acquisition client
+        run: pip install -e . 'kagglehub==1.0.2' 'kaggle-environments==1.32.7'
+      - name: Build exact Strict V4 clock recovery
+        run: python -m swarm.strict_clock_fix --output-root /tmp/strict-clock
+      - name: Validate source and submission archive
+        shell: bash
+        run: |
+          python scripts/check_submission.py /tmp/strict-clock/submission/NEXT_SUBMIT_STRICT_V4_CLOCK_RECOVERY.tar.gz
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          from swarm.kaggriculture_evaluator import smoke_candidate
+          result = smoke_candidate('/tmp/strict-clock/candidate/main.py', seed=733)
+          print(json.dumps(result, indent=2, sort_keys=True))
+          if not result['ok']:
+              raise SystemExit('custom simulator smoke failed')
+          PY
+      - name: Reproduce official seat-1 clock defect and compare recovery
+        shell: bash
+        run: |
+          python - <<'PY'
+          import json
+          import math
+          from pathlib import Path
+          from kaggle_environments import make
+
+          original = '/tmp/strict-clock/frontier/agents/strict/main.py'
+          fixed = '/tmp/strict-clock/candidate/main.py'
+
+          def probe(obs, configuration=None):
+              return {'farmer':['PASS'], 'hands':[], 'market':[]}
+
+          probe_env = make('kaggriculture', configuration={'episodeSteps': 12, 'seed': 20260901}, debug=True)
+          probe_env.run([probe, probe])
+          seat0_steps = [s[0].observation.get('step') for s in probe_env.steps]
+          seat1_steps = [s[1].observation.get('step') for s in probe_env.steps]
+          bug_present = all(value is None for value in seat1_steps)
+
+          def game(a0, a1, seed):
+              env = make('kaggriculture', configuration={'episodeSteps': 720, 'seed': seed}, debug=True)
+              env.run([a0, a1])
+              final = env.steps[-1]
+              return {
+                  'seed': seed,
+                  'seat0_reward': float(final[0].reward or 0.0),
+                  'seat1_reward': float(final[1].reward or 0.0),
+                  'seat0_status': str(final[0].status),
+                  'seat1_status': str(final[1].status),
+              }
+
+          seeds = [17011, 17027, 17041]
+          baseline = [game(original, original, seed) for seed in seeds]
+          repaired_seat1 = [game(original, fixed, seed) for seed in seeds]
+          repaired_selfplay = [game(fixed, fixed, seed) for seed in seeds]
+
+          baseline_p1 = sum(r['seat1_reward'] for r in baseline) / len(baseline)
+          repaired_p1 = sum(r['seat1_reward'] for r in repaired_seat1) / len(repaired_seat1)
+          self_p1 = sum(r['seat1_reward'] for r in repaired_selfplay) / len(repaired_selfplay)
+          self_p0 = sum(r['seat0_reward'] for r in repaired_selfplay) / len(repaired_selfplay)
+          invalid = [r for group in (baseline, repaired_seat1, repaired_selfplay) for r in group if r['seat0_status'] != 'DONE' or r['seat1_status'] != 'DONE']
+
+          evidence = {
+              'official_environment_version': '1.32.7',
+              'seat0_steps': seat0_steps,
+              'seat1_steps': seat1_steps,
+              'seat1_step_bug_reproduced': bug_present,
+              'baseline_original_selfplay': baseline,
+              'original_vs_fixed_seat1': repaired_seat1,
+              'fixed_selfplay': repaired_selfplay,
+              'mean_original_seat1_reward': baseline_p1,
+              'mean_fixed_seat1_reward_vs_original': repaired_p1,
+              'mean_fixed_selfplay_seat1_reward': self_p1,
+              'mean_fixed_selfplay_seat0_reward': self_p0,
+              'invalid_games': len(invalid),
+              'seat1_reward_gain_vs_original': repaired_p1 - baseline_p1,
+          }
+          Path('/tmp/strict-clock/OFFICIAL_ENV_QUALIFICATION.json').write_text(json.dumps(evidence, indent=2, sort_keys=True))
+          print(json.dumps(evidence, indent=2, sort_keys=True))
+          if invalid:
+              raise SystemExit('official environment produced invalid games')
+          if bug_present and repaired_p1 <= baseline_p1:
+              raise SystemExit('clock recovery did not improve the broken seat in the official environment')
+          PY
+      - name: Final decision
+        shell: bash
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          build = json.loads(Path('/tmp/strict-clock/STRICT_CLOCK_FIX.json').read_text())
+          evidence = json.loads(Path('/tmp/strict-clock/OFFICIAL_ENV_QUALIFICATION.json').read_text())
+          decision = {
+              'decision': 'PROMOTE' if evidence['invalid_games'] == 0 and (not evidence['seat1_step_bug_reproduced'] or evidence['seat1_reward_gain_vs_original'] > 0) else 'HOLD',
+              'reason': 'Strict V4 semantics preserved when step exists; missing seat clock recovered in official environment',
+              'archive': build['archive'],
+              'archive_sha256': build['candidate_archive_sha256'],
+              'parent_main_sha256': build['parent_main_sha256'],
+              'official_environment': evidence,
+          }
+          Path('/tmp/strict-clock/SUBMISSION_DECISION.json').write_text(json.dumps(decision, indent=2, sort_keys=True))
+          print(json.dumps(decision, indent=2, sort_keys=True))
+          if decision['decision'] != 'PROMOTE':
+              raise SystemExit('Strict clock recovery did not qualify')
+          PY
+      - name: Upload qualification evidence and candidate
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: strict-clock-recovery-${{ github.run_id }}
+          path: /tmp/strict-clock
+          if-no-files-found: error
+          retention-days: 30

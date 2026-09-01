@@ -1,0 +1,14 @@
+{
+  "enabled": true,
+  "request_id": "v77-live-meta-route-001",
+  "objective": "paired win probability against fresh official top-episode replays",
+  "parent_required_sha256": "ff871d2fbf2b1123668045062677eea7f0239fc95b02d15fedce35c2c1033fd1",
+  "days": 2,
+  "top_episodes_per_day": 8,
+  "promotion": {
+    "min_absolute_win_score": 0.55,
+    "min_delta_win_vs_parent": 0.05,
+    "max_cvar20_regression": 0.10,
+    "max_invalid_games": 0
+  }
+}

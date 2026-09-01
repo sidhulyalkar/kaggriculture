@@ -1,21 +1,22 @@
 from __future__ import annotations
 
 import argparse
+from collections import defaultdict
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from hashlib import sha256
 import json
 from pathlib import Path
 import shutil
+import statistics
 import tarfile
 from typing import Any
 
-from .kaggriculture_evaluator import smoke_candidate
+from .kaggriculture_evaluator import _run_paths, smoke_candidate
 
 
 EXPECTED_V32_ARCHIVE_SHA256 = "ad54a3f9bb94d3123997887da53e71ab69785d5d14ad0f53c51b7691e21d7811"
+PUBLIC_ARENA_SEEDS = (82001, 82013, 82021)
 
-# Public notebook outputs used by the historical Kaggriculture research stack.
-# Acquisition is evidence only: historical leaderboard priors are intentionally
-# not encoded here because they can become stale.
 PUBLIC_SPECS: dict[str, dict[str, Any]] = {
     "v32": {
         "handle": "sidharthhulyalkar21/kaggri-v32-production-compiler",
@@ -123,6 +124,77 @@ def _materialize_public_agent(key: str, downloaded: Path, destination: Path) -> 
     return destination, str(mains[0].parent), None
 
 
+def _public_cross_play(rows: dict[str, dict[str, Any]], families: list[str]) -> dict[str, Any]:
+    jobs: list[tuple[str, str, int, int]] = []
+    for subject in families:
+        for opponent in families:
+            if subject == opponent:
+                continue
+            for seed in PUBLIC_ARENA_SEEDS:
+                for seat in (0, 1):
+                    jobs.append((subject, opponent, seed, seat))
+
+    games: list[dict[str, Any]] = []
+    with ThreadPoolExecutor(max_workers=min(12, max(1, len(jobs)))) as executor:
+        futures = {
+            executor.submit(
+                _run_paths,
+                str(rows[subject]["agent_root"]),
+                str(rows[opponent]["agent_root"]),
+                seed,
+                seat,
+            ): (subject, opponent, seed, seat)
+            for subject, opponent, seed, seat in jobs
+        }
+        for future in as_completed(futures):
+            subject, opponent, seed, seat = futures[future]
+            games.append(
+                {
+                    "subject": subject,
+                    "opponent": opponent,
+                    "seed": seed,
+                    "seat": seat,
+                    **future.result(),
+                }
+            )
+
+    metrics: dict[str, dict[str, Any]] = {}
+    for family in families:
+        valid = [game for game in games if game["subject"] == family and game.get("ok")]
+        invalid = [game for game in games if game["subject"] == family and not game.get("ok")]
+        by_opponent: dict[str, list[float]] = defaultdict(list)
+        for game in valid:
+            by_opponent[str(game["opponent"])].append(float(game["score"]))
+        opponent_scores = {name: statistics.mean(values) for name, values in by_opponent.items() if values}
+        metrics[family] = {
+            "mean_score": statistics.mean(float(game["score"]) for game in valid) if valid else -1.0,
+            "worst_opponent_score": min(opponent_scores.values(), default=-1.0),
+            "mean_margin": statistics.mean(float(game["margin"]) for game in valid) if valid else float("-inf"),
+            "invalid_games": len(invalid),
+            "opponent_scores": opponent_scores,
+            "game_count": len(valid) + len(invalid),
+        }
+
+    eligible = [family for family in families if metrics[family]["invalid_games"] == 0]
+    ranked = sorted(
+        eligible,
+        key=lambda family: (
+            metrics[family]["mean_score"],
+            metrics[family]["worst_opponent_score"],
+            metrics[family]["mean_margin"],
+        ),
+        reverse=True,
+    )
+    return {
+        "seed_count": len(PUBLIC_ARENA_SEEDS),
+        "both_seats": True,
+        "game_count": len(games),
+        "metrics": metrics,
+        "ranking": ranked,
+        "recommended_champion": ranked[0] if ranked else None,
+    }
+
+
 def acquire_frontier(*, output_root: str | Path, keys: list[str] | None = None) -> dict[str, Any]:
     root = Path(output_root).resolve()
     downloads = root / "downloads"
@@ -133,7 +205,7 @@ def acquire_frontier(*, output_root: str | Path, keys: list[str] | None = None) 
 
     try:
         import kagglehub
-    except Exception as exc:  # pragma: no cover - exercised in live runner
+    except Exception as exc:  # pragma: no cover
         raise RuntimeError("kagglehub is required for frontier acquisition") from exc
 
     rows: dict[str, dict[str, Any]] = {}
@@ -176,13 +248,18 @@ def acquire_frontier(*, output_root: str | Path, keys: list[str] | None = None) 
 
     v32 = rows.get("v32", {})
     public_ready = [key for key, row in rows.items() if key != "v32" and row.get("status") == "ready"]
+    arena = _public_cross_play(rows, public_ready) if len(public_ready) >= 2 else {
+        "metrics": {}, "ranking": public_ready, "recommended_champion": public_ready[0] if public_ready else None, "game_count": 0
+    }
     verified_v32 = v32.get("status") == "ready"
     if verified_v32 and len(public_ready) >= 2:
         scope = "verified_v32_public_frontier"
+    elif len(public_ready) >= 4 and arena.get("recommended_champion"):
+        scope = "verified_public_frontier"
     elif verified_v32:
         scope = "verified_v32_thin_frontier"
     elif public_ready:
-        scope = "public_frontier_without_verified_v32"
+        scope = "thin_public_frontier"
     else:
         scope = "acquisition_failed"
     result = {
@@ -191,6 +268,8 @@ def acquire_frontier(*, output_root: str | Path, keys: list[str] | None = None) 
         "expected_v32_archive_sha256": EXPECTED_V32_ARCHIVE_SHA256,
         "ready_public_families": public_ready,
         "ready_public_family_count": len(public_ready),
+        "public_arena": arena,
+        "recommended_public_champion": arena.get("recommended_champion"),
         "resources": rows,
     }
     (root / "FRONTIER_ACQUISITION.json").write_text(json.dumps(result, indent=2, sort_keys=True), encoding="utf-8")
@@ -198,7 +277,7 @@ def acquire_frontier(*, output_root: str | Path, keys: list[str] | None = None) 
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Acquire and runtime-verify public Kaggriculture frontier agents")
+    parser = argparse.ArgumentParser(description="Acquire, runtime-verify and cross-play public Kaggriculture frontier agents")
     parser.add_argument("--output-root", default="swarm/runs/frontier")
     parser.add_argument("--keys", nargs="*", default=None)
     parser.add_argument("--require-v32", action="store_true")

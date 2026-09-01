@@ -34,13 +34,7 @@ def _read(path: Path) -> str:
 
 
 def _read_agent_bundle(path: str | None) -> str:
-    """Return dependency-complete readable source for an informed parent policy.
-
-    Candidate builders emit a quarantined single-file `main.py`; therefore a
-    multi-file parent must be shown as a bundle with explicit file boundaries,
-    otherwise a model may copy an entry-point import that cannot survive
-    quarantine. Binary/cache/notebook artifacts are intentionally excluded.
-    """
+    """Return dependency-complete readable source for an informed parent policy."""
     if not path:
         return ""
     p = Path(path)
@@ -60,8 +54,8 @@ def _read_agent_bundle(path: str | None) -> str:
     )
     sections = [
         "# DEPENDENCY-COMPLETE CURRENT CONTROL BUNDLE",
-        "# IMPORTANT: generated candidates are quarantined as one main.py.",
-        "# Do not leave imports to sibling files from this bundle. Inline any required parent logic.",
+        "# For champion-informed lanes these trusted files are copied byte-for-byte into candidate quarantine.",
+        "# Prefer a narrow generated main.py wrapper around these modules rather than reconstructing trusted mechanics.",
     ]
     for child in files:
         sections.extend(
@@ -182,6 +176,7 @@ def run_epoch(
     role_config = {str(role["id"]): role for role in config["roles"]}
     feedback = Path(feedback_path).read_text(encoding="utf-8") if feedback_path else ""
     champion_source = _read_agent_bundle(champion_path)
+    champion_root = Path(champion_path).resolve() if champion_path and Path(champion_path).is_dir() else None
     epoch_id = _epoch_id()
     epoch_root = Path(output_root).resolve() / epoch_id
     epoch_root.mkdir(parents=True, exist_ok=False)
@@ -284,10 +279,12 @@ def run_epoch(
 
         model_cfg = config["providers"]["models"][task.model_key]
         provider = build_provider(str(model_cfg["provider"]), manual_outbox=outbox)
+        trusted_parent_available = task.packet_kind in CHAMPION_INFORMED_PACKETS and champion_root is not None
         build_prompt = candidate_build_prompt(
             claim=claim,
             packet_text=packet_by_task[task_id],
             build_contract=build_contract,
+            trusted_parent_available=trusted_parent_available,
         )
         try:
             built = provider.complete(
@@ -305,6 +302,7 @@ def run_epoch(
                 output_root=candidates_root,
                 architecture_tags=(task.role,) if task.lane == "architecture" else (),
                 mechanism_tags=(task.lane,),
+                trusted_parent_root=champion_root if trusted_parent_available else None,
             )
         except (ProviderError, ValueError) as exc:
             registry.reviews.append(

@@ -1,0 +1,9 @@
+{
+  "enabled": true,
+  "request_id": "strict-cash-ablation-001",
+  "parent": "strict",
+  "published_parent_score": 3090.1,
+  "frontier_keys": ["strict", "barnyard", "weedslip", "moon", "soil"],
+  "terminal_metric": "bank_cash",
+  "both_seats": true
+}

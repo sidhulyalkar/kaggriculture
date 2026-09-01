@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 from hashlib import sha256
 import json
 from pathlib import Path
+from threading import BoundedSemaphore
 from typing import Any
 from uuid import uuid4
 
@@ -148,17 +149,41 @@ def _call_researcher(
     system: str,
     outbox: Path,
     dry_run: bool,
+    limiter: BoundedSemaphore | None = None,
 ) -> tuple[ResearchTask, str, dict[str, Any]]:
     model_cfg = config["providers"]["models"][task.model_key]
     provider_name = "manual" if dry_run else str(model_cfg["provider"])
     provider = build_provider(provider_name, manual_outbox=outbox)
-    response = provider.complete(
-        model=str(model_cfg["model"]),
-        system=system,
-        prompt=task.prompt,
-        timeout_s=int(config["providers"]["default_timeout_s"]),
-    )
+
+    def _complete():
+        return provider.complete(
+            model=str(model_cfg["model"]),
+            system=system,
+            prompt=task.prompt,
+            timeout_s=int(config["providers"]["default_timeout_s"]),
+        )
+
+    if limiter is None:
+        response = _complete()
+    else:
+        with limiter:
+            response = _complete()
     return task, response.text, response.metadata
+
+
+def _write_candidate_checkpoint(epoch_root: Path, registry: SwarmRegistry, processed: int, total: int) -> None:
+    (epoch_root / "CANDIDATES_CHECKPOINT.json").write_text(
+        json.dumps(
+            {
+                "processed_buildable_research_results": processed,
+                "total_research_results": total,
+                "ready_candidates": registry.candidates.read(),
+            },
+            indent=2,
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
 
 
 def run_epoch(
@@ -200,6 +225,12 @@ def run_epoch(
     for task, _packet in tasks:
         registry.tasks.append(task)
 
+    model_limits = {
+        str(model): max(1, int(limit))
+        for model, limit in config["providers"].get("model_parallel_limits", {}).items()
+    }
+    model_semaphores = {model: BoundedSemaphore(limit) for model, limit in model_limits.items()}
+
     manifest = {
         "epoch_id": epoch_id,
         "config_path": str(Path(config_path).resolve()),
@@ -210,6 +241,7 @@ def run_epoch(
         "feedback_hash": sha256(feedback.encode("utf-8")).hexdigest() if feedback else None,
         "champion_source_hash": sha256(champion_source.encode("utf-8")).hexdigest() if champion_source else None,
         "champion_context": "dependency_complete_bundle" if champion_source else None,
+        "model_parallel_limits": model_limits,
         "screen_seed_hash": sha256(
             json.dumps(config["experiments"]["screen"]["seeds"], sort_keys=True).encode("utf-8")
         ).hexdigest(),
@@ -222,24 +254,34 @@ def run_epoch(
     max_workers = int(config["providers"]["max_parallel_requests"])
     research_results: dict[str, tuple[str, dict[str, Any]]] = {}
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
-        futures = {
-            executor.submit(
+        futures = {}
+        for task, _packet in tasks:
+            model_cfg = config["providers"]["models"][task.model_key]
+            model_name = str(model_cfg["model"])
+            future = executor.submit(
                 _call_researcher,
                 task=task,
                 config=config,
                 system=system,
                 outbox=outbox,
                 dry_run=dry_run,
-            ): task
-            for task, _packet in tasks
-        }
+                limiter=model_semaphores.get(model_name),
+            )
+            futures[future] = task
         for future in as_completed(futures):
             task = futures[future]
             try:
                 _task, text, metadata = future.result()
             except ProviderError as exc:
                 registry.reviews.append(
-                    {"task_id": task.task_id, "stage": "research", "status": "provider_error", "error": str(exc)}
+                    {
+                        "task_id": task.task_id,
+                        "stage": "research",
+                        "status": "provider_error",
+                        "error": str(exc),
+                        "retryable": bool(getattr(exc, "retryable", False)),
+                        "status_code": getattr(exc, "status_code", None),
+                    }
                 )
                 continue
             research_results[task.task_id] = (text, metadata)
@@ -259,6 +301,7 @@ def run_epoch(
     task_by_id = {task.task_id: task for task, _packet in tasks}
     seen_source_hashes: set[str] = set()
     smoke_seed = 73 + 10000 * int(round_index)
+    processed = 0
 
     for task_id, (response, _metadata) in research_results.items():
         task = task_by_id[task_id]
@@ -268,6 +311,8 @@ def run_epoch(
             registry.reviews.append(
                 {"task_id": task_id, "stage": "parse", "status": "rejected", "error": str(exc)}
             )
+            processed += 1
+            _write_candidate_checkpoint(epoch_root, registry, processed, len(research_results))
             continue
         registry.claims.append(claim)
 
@@ -275,6 +320,8 @@ def run_epoch(
             registry.reviews.append(
                 {"task_id": task_id, "stage": "build", "status": "skipped_research_only_role"}
             )
+            processed += 1
+            _write_candidate_checkpoint(epoch_root, registry, processed, len(research_results))
             continue
 
         model_cfg = config["providers"]["models"][task.model_key]
@@ -306,8 +353,17 @@ def run_epoch(
             )
         except (ProviderError, ValueError) as exc:
             registry.reviews.append(
-                {"task_id": task_id, "stage": "build", "status": "rejected", "error": str(exc)}
+                {
+                    "task_id": task_id,
+                    "stage": "build",
+                    "status": "rejected",
+                    "error": str(exc),
+                    "retryable": bool(getattr(exc, "retryable", False)),
+                    "status_code": getattr(exc, "status_code", None),
+                }
             )
+            processed += 1
+            _write_candidate_checkpoint(epoch_root, registry, processed, len(research_results))
             continue
 
         static = check_file(candidate.source_path)
@@ -321,6 +377,8 @@ def run_epoch(
             }
         )
         if not static.ok:
+            processed += 1
+            _write_candidate_checkpoint(epoch_root, registry, processed, len(research_results))
             continue
 
         if candidate.source_hash in seen_source_hashes:
@@ -333,6 +391,8 @@ def run_epoch(
                     "source_hash": candidate.source_hash,
                 }
             )
+            processed += 1
+            _write_candidate_checkpoint(epoch_root, registry, processed, len(research_results))
             continue
         seen_source_hashes.add(candidate.source_hash)
 
@@ -348,6 +408,8 @@ def run_epoch(
         )
         if smoke["ok"]:
             registry.candidates.append(candidate)
+        processed += 1
+        _write_candidate_checkpoint(epoch_root, registry, processed, len(research_results))
 
     validation_errors = registry.validate()
     if validation_errors:

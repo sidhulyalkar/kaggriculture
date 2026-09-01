@@ -47,17 +47,33 @@ def _public_context(config: dict[str, Any], epoch_id: str) -> dict[str, Any]:
     }
 
 
-def _tasks(config: dict[str, Any], epoch_id: str, repo_root: Path) -> list[tuple[ResearchTask, str]]:
+def _tasks(
+    config: dict[str, Any],
+    epoch_id: str,
+    repo_root: Path,
+    *,
+    feedback: str,
+    round_index: int,
+) -> list[tuple[ResearchTask, str]]:
     tasks: list[tuple[ResearchTask, str]] = []
     context = _public_context(config, epoch_id)
-    info_round = config["information_release"]["rounds"][0]
+    rounds = list(config["information_release"]["rounds"])
+    info_round = rounds[min(round_index, len(rounds) - 1)]
     for role in config["roles"]:
         role_id = str(role["id"])
         model_cfg = config["providers"]["models"].get(role_id)
         if model_cfg is None:
             raise KeyError(f"No provider model configured for role {role_id!r}")
+        packet_kind = str(role["packet"])
+        # Blank-sheet architects remain intentionally isolated from cross-agent implementation hints.
+        role_feedback = "" if packet_kind == "blank_sheet" else feedback
         for index in range(int(role["count"])):
-            packet = build_packet(repo_root=repo_root, kind=str(role["packet"]), public_context=context)
+            packet = build_packet(
+                repo_root=repo_root,
+                kind=packet_kind,
+                public_context=context,
+                extra_evidence=role_feedback,
+            )
             task_id = f"task-{role_id}-{index:02d}-{uuid4().hex[:8]}"
             prompt = (
                 f"# ASSIGNED ROLE\n{role_id}\n\n"
@@ -71,7 +87,7 @@ def _tasks(config: dict[str, Any], epoch_id: str, repo_root: Path) -> list[tuple
                 role=role_id,
                 lane=str(role["lane"]),
                 model_key=role_id,
-                packet_kind=str(role["packet"]),
+                packet_kind=packet_kind,
                 information_round=info_round,
                 prompt=prompt,
                 packet_hash=packet.packet_hash,
@@ -100,10 +116,19 @@ def _call_researcher(
     return task, response.text, response.metadata
 
 
-def run_epoch(*, config_path: str, repo_root: str, output_root: str, dry_run: bool) -> Path:
+def run_epoch(
+    *,
+    config_path: str,
+    repo_root: str,
+    output_root: str,
+    dry_run: bool,
+    feedback_path: str | None = None,
+    round_index: int = 0,
+) -> Path:
     repo_root_path = Path(repo_root).resolve()
     config = load_config(config_path)
     role_config = {str(role["id"]): role for role in config["roles"]}
+    feedback = Path(feedback_path).read_text(encoding="utf-8") if feedback_path else ""
     epoch_id = _epoch_id()
     epoch_root = Path(output_root).resolve() / epoch_id
     epoch_root.mkdir(parents=True, exist_ok=False)
@@ -116,7 +141,7 @@ def run_epoch(*, config_path: str, repo_root: str, output_root: str, dry_run: bo
         repo_root_path / "swarm/prompts/roles.md"
     )
     build_contract = _read(repo_root_path / "swarm/prompts/build.md")
-    tasks = _tasks(config, epoch_id, repo_root_path)
+    tasks = _tasks(config, epoch_id, repo_root_path, feedback=feedback, round_index=round_index)
     for task, _packet in tasks:
         registry.tasks.append(task)
 
@@ -126,6 +151,8 @@ def run_epoch(*, config_path: str, repo_root: str, output_root: str, dry_run: bo
         "config_hash": sha256(json.dumps(config, sort_keys=True).encode("utf-8")).hexdigest(),
         "dry_run": dry_run,
         "task_count": len(tasks),
+        "round_index": round_index,
+        "feedback_hash": sha256(feedback.encode("utf-8")).hexdigest() if feedback else None,
         "screen_seed_hash": sha256(
             json.dumps(config["experiments"]["screen"]["seeds"], sort_keys=True).encode("utf-8")
         ).hexdigest(),
@@ -249,6 +276,8 @@ def main() -> None:
     parser.add_argument("--config", default="swarm/config/default.yaml")
     parser.add_argument("--repo-root", default=".")
     parser.add_argument("--output-root", default="swarm/runs")
+    parser.add_argument("--feedback", default=None, help="screen-only feedback JSON from the previous epoch")
+    parser.add_argument("--round-index", type=int, default=0)
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args()
     root = run_epoch(
@@ -256,6 +285,8 @@ def main() -> None:
         repo_root=args.repo_root,
         output_root=args.output_root,
         dry_run=args.dry_run,
+        feedback_path=args.feedback,
+        round_index=args.round_index,
     )
     print(root)
 

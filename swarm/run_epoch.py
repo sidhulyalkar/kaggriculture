@@ -19,6 +19,9 @@ from .registry import SwarmRegistry
 from .safety import check_file
 
 
+CHAMPION_INFORMED_PACKETS = {"champion_counter", "trace_mechanism", "frontier_residual"}
+
+
 def _epoch_id() -> str:
     stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     return f"epoch-{stamp}-{uuid4().hex[:6]}"
@@ -26,6 +29,17 @@ def _epoch_id() -> str:
 
 def _read(path: Path) -> str:
     return path.read_text(encoding="utf-8")
+
+
+def _read_agent_source(path: str | None) -> str:
+    if not path:
+        return ""
+    p = Path(path)
+    if p.is_dir():
+        p = p / "main.py"
+    if not p.exists():
+        raise FileNotFoundError(f"champion source not found: {p}")
+    return p.read_text(encoding="utf-8", errors="replace")
 
 
 def _public_context(config: dict[str, Any], epoch_id: str) -> dict[str, Any]:
@@ -53,6 +67,7 @@ def _tasks(
     repo_root: Path,
     *,
     feedback: str,
+    champion_source: str,
     round_index: int,
 ) -> list[tuple[ResearchTask, str]]:
     tasks: list[tuple[ResearchTask, str]] = []
@@ -65,14 +80,18 @@ def _tasks(
         if model_cfg is None:
             raise KeyError(f"No provider model configured for role {role_id!r}")
         packet_kind = str(role["packet"])
-        # Blank-sheet architects remain intentionally isolated from cross-agent implementation hints.
-        role_feedback = "" if packet_kind == "blank_sheet" else feedback
+        evidence_sections: list[str] = []
+        if packet_kind != "blank_sheet" and feedback:
+            evidence_sections.extend(("### PRIOR SCREEN-ONLY COUNCIL FEEDBACK", feedback))
+        if packet_kind in CHAMPION_INFORMED_PACKETS and champion_source:
+            evidence_sections.extend(("### EXACT CURRENT CHAMPION SOURCE", "```python", champion_source, "```"))
+        role_evidence = "\n\n".join(evidence_sections)
         for index in range(int(role["count"])):
             packet = build_packet(
                 repo_root=repo_root,
                 kind=packet_kind,
                 public_context=context,
-                extra_evidence=role_feedback,
+                extra_evidence=role_evidence,
             )
             task_id = f"task-{role_id}-{index:02d}-{uuid4().hex[:8]}"
             prompt = (
@@ -124,11 +143,13 @@ def run_epoch(
     dry_run: bool,
     feedback_path: str | None = None,
     round_index: int = 0,
+    champion_path: str | None = None,
 ) -> Path:
     repo_root_path = Path(repo_root).resolve()
     config = load_config(config_path)
     role_config = {str(role["id"]): role for role in config["roles"]}
     feedback = Path(feedback_path).read_text(encoding="utf-8") if feedback_path else ""
+    champion_source = _read_agent_source(champion_path)
     epoch_id = _epoch_id()
     epoch_root = Path(output_root).resolve() / epoch_id
     epoch_root.mkdir(parents=True, exist_ok=False)
@@ -141,7 +162,14 @@ def run_epoch(
         repo_root_path / "swarm/prompts/roles.md"
     )
     build_contract = _read(repo_root_path / "swarm/prompts/build.md")
-    tasks = _tasks(config, epoch_id, repo_root_path, feedback=feedback, round_index=round_index)
+    tasks = _tasks(
+        config,
+        epoch_id,
+        repo_root_path,
+        feedback=feedback,
+        champion_source=champion_source,
+        round_index=round_index,
+    )
     for task, _packet in tasks:
         registry.tasks.append(task)
 
@@ -153,6 +181,7 @@ def run_epoch(
         "task_count": len(tasks),
         "round_index": round_index,
         "feedback_hash": sha256(feedback.encode("utf-8")).hexdigest() if feedback else None,
+        "champion_source_hash": sha256(champion_source.encode("utf-8")).hexdigest() if champion_source else None,
         "screen_seed_hash": sha256(
             json.dumps(config["experiments"]["screen"]["seeds"], sort_keys=True).encode("utf-8")
         ).hexdigest(),
@@ -278,6 +307,7 @@ def main() -> None:
     parser.add_argument("--output-root", default="swarm/runs")
     parser.add_argument("--feedback", default=None, help="screen-only feedback JSON from the previous epoch")
     parser.add_argument("--round-index", type=int, default=0)
+    parser.add_argument("--champion-path", default=None)
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args()
     root = run_epoch(
@@ -287,6 +317,7 @@ def main() -> None:
         dry_run=args.dry_run,
         feedback_path=args.feedback,
         round_index=args.round_index,
+        champion_path=args.champion_path,
     )
     print(root)
 

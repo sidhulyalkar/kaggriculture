@@ -28,22 +28,75 @@ class BaseProvider:
         raise NotImplementedError
 
 
-class OpenAICompatibleProvider(BaseProvider):
-    """Minimal chat-completions adapter for OpenAI-compatible endpoints.
+def _post_json(*, endpoint: str, api_key: str, body: dict[str, Any], timeout_s: int) -> dict[str, Any]:
+    request = urllib.request.Request(
+        endpoint,
+        data=json.dumps(body).encode("utf-8"),
+        headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=timeout_s) as response:
+            return json.loads(response.read().decode("utf-8"))
+    except urllib.error.HTTPError as exc:
+        detail = exc.read().decode("utf-8", errors="replace")[-2000:]
+        raise ProviderError(f"HTTP {exc.code}: {detail}") from exc
+    except (urllib.error.URLError, TimeoutError, json.JSONDecodeError) as exc:
+        raise ProviderError(f"provider request failed: {exc}") from exc
 
-    Endpoint and key are injected at runtime. Keeping this module stdlib-only makes the
-    orchestration layer usable in constrained Kaggle/local environments.
-    """
 
-    def __init__(self, *, name: str, endpoint: str, api_key_env: str):
-        self.name = name
+class OpenAIResponsesProvider(BaseProvider):
+    name = "openai"
+
+    def __init__(self, endpoint: str = "https://api.openai.com/v1/responses"):
         self.endpoint = endpoint
-        self.api_key_env = api_key_env
+
+    @staticmethod
+    def _output_text(payload: dict[str, Any]) -> str:
+        chunks: list[str] = []
+        for item in payload.get("output", []):
+            if not isinstance(item, dict) or item.get("type") != "message":
+                continue
+            for content in item.get("content", []):
+                if isinstance(content, dict) and content.get("type") == "output_text":
+                    text = content.get("text")
+                    if text:
+                        chunks.append(str(text))
+        if not chunks and isinstance(payload.get("output_text"), str):
+            chunks.append(payload["output_text"])
+        if not chunks:
+            raise ProviderError("OpenAI Responses payload contained no output_text")
+        return "\n".join(chunks)
 
     def complete(self, *, model: str, system: str, prompt: str, timeout_s: int) -> ProviderResponse:
-        api_key = os.environ.get(self.api_key_env)
+        api_key = os.environ.get("OPENAI_API_KEY")
         if not api_key:
-            raise ProviderError(f"Missing environment variable {self.api_key_env}")
+            raise ProviderError("Missing environment variable OPENAI_API_KEY")
+        body: dict[str, Any] = {
+            "model": model,
+            "instructions": system,
+            "input": prompt,
+            "reasoning": {"effort": os.environ.get("SWARM_OPENAI_REASONING", "high")},
+        }
+        payload = _post_json(endpoint=self.endpoint, api_key=api_key, body=body, timeout_s=timeout_s)
+        return ProviderResponse(
+            text=self._output_text(payload),
+            provider=self.name,
+            model=model,
+            metadata=dict(payload.get("usage", {})),
+        )
+
+
+class NvidiaNimProvider(BaseProvider):
+    name = "nvidia"
+
+    def __init__(self, endpoint: str = "https://integrate.api.nvidia.com/v1/chat/completions"):
+        self.endpoint = endpoint
+
+    def complete(self, *, model: str, system: str, prompt: str, timeout_s: int) -> ProviderResponse:
+        api_key = os.environ.get("NVIDIA_API_KEY")
+        if not api_key:
+            raise ProviderError("Missing environment variable NVIDIA_API_KEY")
         body = {
             "model": model,
             "messages": [
@@ -51,26 +104,21 @@ class OpenAICompatibleProvider(BaseProvider):
                 {"role": "user", "content": prompt},
             ],
             "temperature": 0.7,
+            "top_p": 0.95,
+            "max_tokens": int(os.environ.get("SWARM_NVIDIA_MAX_TOKENS", "16384")),
+            "stream": False,
         }
-        request = urllib.request.Request(
-            self.endpoint,
-            data=json.dumps(body).encode("utf-8"),
-            headers={
-                "Authorization": f"Bearer {api_key}",
-                "Content-Type": "application/json",
-            },
-            method="POST",
-        )
-        try:
-            with urllib.request.urlopen(request, timeout=timeout_s) as response:
-                payload = json.loads(response.read().decode("utf-8"))
-        except (urllib.error.URLError, TimeoutError, json.JSONDecodeError) as exc:
-            raise ProviderError(f"{self.name} request failed: {exc}") from exc
+        payload = _post_json(endpoint=self.endpoint, api_key=api_key, body=body, timeout_s=timeout_s)
         try:
             text = payload["choices"][0]["message"]["content"]
         except (KeyError, IndexError, TypeError) as exc:
-            raise ProviderError(f"Unexpected {self.name} response shape") from exc
-        return ProviderResponse(text=text, provider=self.name, model=model, metadata=payload.get("usage", {}))
+            raise ProviderError("Unexpected NVIDIA NIM response shape") from exc
+        return ProviderResponse(
+            text=str(text),
+            provider=self.name,
+            model=model,
+            metadata=dict(payload.get("usage", {})),
+        )
 
 
 class ManualProvider(BaseProvider):
@@ -99,11 +147,11 @@ class ManualProvider(BaseProvider):
 def build_provider(name: str, *, manual_outbox: str | Path) -> BaseProvider:
     normalized = name.lower()
     if normalized == "openai":
-        endpoint = os.environ.get("OPENAI_CHAT_COMPLETIONS_URL", "https://api.openai.com/v1/chat/completions")
-        return OpenAICompatibleProvider(name="openai", endpoint=endpoint, api_key_env="OPENAI_API_KEY")
+        endpoint = os.environ.get("OPENAI_RESPONSES_URL", "https://api.openai.com/v1/responses")
+        return OpenAIResponsesProvider(endpoint=endpoint)
     if normalized == "nvidia":
         endpoint = os.environ.get("NVIDIA_CHAT_COMPLETIONS_URL", "https://integrate.api.nvidia.com/v1/chat/completions")
-        return OpenAICompatibleProvider(name="nvidia", endpoint=endpoint, api_key_env="NVIDIA_API_KEY")
+        return NvidiaNimProvider(endpoint=endpoint)
     if normalized == "manual":
         return ManualProvider(manual_outbox)
     raise ProviderError(f"Unknown provider {name!r}")

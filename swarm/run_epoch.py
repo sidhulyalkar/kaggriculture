@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import argparse
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from dataclasses import asdict
 from datetime import datetime, timezone
 from hashlib import sha256
 import json
@@ -48,8 +47,7 @@ def _public_context(config: dict[str, Any], epoch_id: str) -> dict[str, Any]:
     }
 
 
-def _tasks(config: dict[str, Any], epoch_id: str, repo_root: Path, system: str) -> list[tuple[ResearchTask, str]]:
-    del system
+def _tasks(config: dict[str, Any], epoch_id: str, repo_root: Path) -> list[tuple[ResearchTask, str]]:
     tasks: list[tuple[ResearchTask, str]] = []
     context = _public_context(config, epoch_id)
     info_round = config["information_release"]["rounds"][0]
@@ -59,11 +57,7 @@ def _tasks(config: dict[str, Any], epoch_id: str, repo_root: Path, system: str) 
         if model_cfg is None:
             raise KeyError(f"No provider model configured for role {role_id!r}")
         for index in range(int(role["count"])):
-            packet = build_packet(
-                repo_root=repo_root,
-                kind=str(role["packet"]),
-                public_context=context,
-            )
+            packet = build_packet(repo_root=repo_root, kind=str(role["packet"]), public_context=context)
             task_id = f"task-{role_id}-{index:02d}-{uuid4().hex[:8]}"
             prompt = (
                 f"# ASSIGNED ROLE\n{role_id}\n\n"
@@ -109,6 +103,7 @@ def _call_researcher(
 def run_epoch(*, config_path: str, repo_root: str, output_root: str, dry_run: bool) -> Path:
     repo_root_path = Path(repo_root).resolve()
     config = load_config(config_path)
+    role_config = {str(role["id"]): role for role in config["roles"]}
     epoch_id = _epoch_id()
     epoch_root = Path(output_root).resolve() / epoch_id
     epoch_root.mkdir(parents=True, exist_ok=False)
@@ -121,7 +116,7 @@ def run_epoch(*, config_path: str, repo_root: str, output_root: str, dry_run: bo
         repo_root_path / "swarm/prompts/roles.md"
     )
     build_contract = _read(repo_root_path / "swarm/prompts/build.md")
-    tasks = _tasks(config, epoch_id, repo_root_path, system)
+    tasks = _tasks(config, epoch_id, repo_root_path)
     for task, _packet in tasks:
         registry.tasks.append(task)
 
@@ -134,7 +129,6 @@ def run_epoch(*, config_path: str, repo_root: str, output_root: str, dry_run: bo
         "screen_seed_hash": sha256(
             json.dumps(config["experiments"]["screen"]["seeds"], sort_keys=True).encode("utf-8")
         ).hexdigest(),
-        # Only a hash of held-out seeds is persisted in the public epoch manifest.
         "heldout_seed_hash": sha256(
             json.dumps(config["experiments"]["heldout"]["seeds"], sort_keys=True).encode("utf-8")
         ).hexdigest(),
@@ -189,6 +183,12 @@ def run_epoch(*, config_path: str, repo_root: str, output_root: str, dry_run: bo
             )
             continue
         registry.claims.append(claim)
+
+        if not bool(role_config[task.role].get("build_candidate", True)):
+            registry.reviews.append(
+                {"task_id": task_id, "stage": "build", "status": "skipped_research_only_role"}
+            )
+            continue
 
         model_cfg = config["providers"]["models"][task.model_key]
         provider = build_provider(str(model_cfg["provider"]), manual_outbox=outbox)

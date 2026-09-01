@@ -13,6 +13,9 @@ from .promotion import promotion_decision, select_portfolio
 from .registry import SwarmRegistry
 
 
+DEFAULT_SUBMISSION_SLOTS = ["champion", "counter", "architecture", "robust", "explorer"]
+
+
 def _candidate_from_row(row: dict) -> CandidateRecord:
     return CandidateRecord(
         candidate_id=str(row["candidate_id"]),
@@ -36,6 +39,16 @@ def _with_metadata(evaluation: EvaluationRecord, candidate: CandidateRecord, **e
 
 def _shifted(values: list[int], offset: int) -> tuple[int, ...]:
     return tuple(int(value) + int(offset) for value in values)
+
+
+def _submission_slots(config: dict) -> list[str]:
+    legacy = config.get("submission_portfolio", {})
+    slots = legacy.get("slots") if isinstance(legacy, dict) else None
+    if not slots:
+        slots = config.get("submission_slots")
+    if not slots:
+        slots = DEFAULT_SUBMISSION_SLOTS
+    return [str(slot) for slot in slots]
 
 
 def _screen_survives(evaluation: EvaluationRecord, screen_cfg: dict) -> bool:
@@ -111,7 +124,7 @@ def evaluate_epoch(
         if decision.promote:
             promoted_ids.add(candidate.candidate_id)
 
-    slots = list(config["submission_portfolio"]["slots"])
+    slots = _submission_slots(config)
     portfolio = select_portfolio(heldout_objects, promoted_ids, slots)
     if not portfolio.get("champion"):
         portfolio["champion"] = "CURRENT_CHAMPION"

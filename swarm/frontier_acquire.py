@@ -8,6 +8,8 @@ import shutil
 import tarfile
 from typing import Any
 
+from .kaggriculture_evaluator import smoke_candidate
+
 
 EXPECTED_V32_ARCHIVE_SHA256 = "ad54a3f9bb94d3123997887da53e71ab69785d5d14ad0f53c51b7691e21d7811"
 
@@ -20,21 +22,11 @@ PUBLIC_SPECS: dict[str, dict[str, Any]] = {
         "archive_names": ("SUBMIT_V32_RUNTIME_VERIFIED.tar.gz", "SUBMIT_V32_PREMIUM_FRONT_SINGLEFILE.tar.gz"),
         "required_sha256": EXPECTED_V32_ARCHIVE_SHA256,
     },
-    "strict": {
-        "handle": "kaitofukami/25-27-strict-future-v27-midgame-meta-reset",
-    },
-    "barnyard": {
-        "handle": "romanrozen/strong-barnyard-economist",
-    },
-    "weedslip": {
-        "handle": "kaitofukami/159-160-vs-frontier-v20-weed-slip-recovery",
-    },
-    "moon": {
-        "handle": "prvsiyan/kaggriculture-frontier-the-moon-counts-melons",
-    },
-    "soil": {
-        "handle": "prvsiyan/kaggriculture-frontier-the-soil-remembers-rain",
-    },
+    "strict": {"handle": "kaitofukami/25-27-strict-future-v27-midgame-meta-reset"},
+    "barnyard": {"handle": "romanrozen/strong-barnyard-economist"},
+    "weedslip": {"handle": "kaitofukami/159-160-vs-frontier-v20-weed-slip-recovery"},
+    "moon": {"handle": "prvsiyan/kaggriculture-frontier-the-moon-counts-melons"},
+    "soil": {"handle": "prvsiyan/kaggriculture-frontier-the-soil-remembers-rain"},
 }
 
 
@@ -145,7 +137,7 @@ def acquire_frontier(*, output_root: str | Path, keys: list[str] | None = None) 
         raise RuntimeError("kagglehub is required for frontier acquisition") from exc
 
     rows: dict[str, dict[str, Any]] = {}
-    for key in selected:
+    for index, key in enumerate(selected):
         if key not in PUBLIC_SPECS:
             rows[key] = {"status": "unknown_spec"}
             continue
@@ -161,12 +153,16 @@ def acquire_frontier(*, output_root: str | Path, keys: list[str] | None = None) 
                 downloaded = download_dir
             destination = agents / key
             agent_root, source, archive_sha = _materialize_public_agent(key, downloaded, destination)
+            smoke = smoke_candidate(str(agent_root / "main.py"), seed=81001 + 20 * index)
+            if not smoke["ok"]:
+                raise RuntimeError(f"runtime smoke failed: {smoke}")
             row = {
                 "status": "ready",
                 "handle": handle,
                 "agent_root": str(agent_root),
                 "main_path": str(agent_root / "main.py"),
                 "source": source,
+                "runtime_smoke": smoke,
             }
             if archive_sha:
                 row["archive_sha256"] = archive_sha
@@ -175,16 +171,26 @@ def acquire_frontier(*, output_root: str | Path, keys: list[str] | None = None) 
             rows[key] = {
                 "status": "failed",
                 "handle": handle,
-                "error": f"{type(exc).__name__}: {exc}"[:1200],
+                "error": f"{type(exc).__name__}: {exc}"[:1600],
             }
 
     v32 = rows.get("v32", {})
     public_ready = [key for key, row in rows.items() if key != "v32" and row.get("status") == "ready"]
+    verified_v32 = v32.get("status") == "ready"
+    if verified_v32 and len(public_ready) >= 2:
+        scope = "verified_v32_public_frontier"
+    elif verified_v32:
+        scope = "verified_v32_thin_frontier"
+    elif public_ready:
+        scope = "public_frontier_without_verified_v32"
+    else:
+        scope = "acquisition_failed"
     result = {
-        "scope": "verified_v32_public_frontier" if v32.get("status") == "ready" else "public_frontier_without_verified_v32",
-        "verified_v32": v32.get("status") == "ready",
+        "scope": scope,
+        "verified_v32": verified_v32,
         "expected_v32_archive_sha256": EXPECTED_V32_ARCHIVE_SHA256,
         "ready_public_families": public_ready,
+        "ready_public_family_count": len(public_ready),
         "resources": rows,
     }
     (root / "FRONTIER_ACQUISITION.json").write_text(json.dumps(result, indent=2, sort_keys=True), encoding="utf-8")
@@ -192,7 +198,7 @@ def acquire_frontier(*, output_root: str | Path, keys: list[str] | None = None) 
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Acquire reproducible public Kaggriculture frontier agents")
+    parser = argparse.ArgumentParser(description="Acquire and runtime-verify public Kaggriculture frontier agents")
     parser.add_argument("--output-root", default="swarm/runs/frontier")
     parser.add_argument("--keys", nargs="*", default=None)
     parser.add_argument("--require-v32", action="store_true")

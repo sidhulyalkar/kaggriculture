@@ -38,6 +38,21 @@ def _shifted(values: list[int], offset: int) -> tuple[int, ...]:
     return tuple(int(value) + int(offset) for value in values)
 
 
+def _screen_survives(evaluation: EvaluationRecord, screen_cfg: dict) -> bool:
+    if evaluation.invalid_games != 0:
+        return False
+    min_score = float(screen_cfg.get("min_paired_score_delta", -0.05))
+    min_cash = float(screen_cfg.get("min_paired_cash_delta", float("-inf")))
+    min_cash_relative = float(screen_cfg.get("min_paired_cash_relative_delta", float("-inf")))
+    paired_cash = float(evaluation.metadata.get("paired_cash_delta", float("-inf")))
+    paired_cash_relative = float(evaluation.metadata.get("paired_cash_relative_delta", float("-inf")))
+    return (
+        evaluation.paired_score_delta >= min_score
+        and paired_cash >= min_cash
+        and paired_cash_relative >= min_cash_relative
+    )
+
+
 def evaluate_epoch(
     *,
     epoch_root: str,
@@ -51,7 +66,8 @@ def evaluate_epoch(
     registry = SwarmRegistry(epoch / "registry")
     candidates = [_candidate_from_row(row) for row in registry.candidates.read()]
     thresholds = config["experiments"]["promotion"]
-    screen_seeds = _shifted(config["experiments"]["screen"]["seeds"], seed_offset)
+    screen_cfg = config["experiments"]["screen"]
+    screen_seeds = _shifted(screen_cfg["seeds"], seed_offset)
     heldout_seeds = _shifted(config["experiments"]["heldout"]["seeds"], seed_offset)
 
     screen_objects: list[EvaluationRecord] = []
@@ -63,12 +79,12 @@ def evaluate_epoch(
             champion_path=champion_path,
             stage="screen",
             seeds=screen_seeds,
-            both_seats=bool(config["experiments"]["screen"]["both_seats"]),
+            both_seats=bool(screen_cfg["both_seats"]),
         )
         evaluation = _with_metadata(evaluate_with_callable(request, evaluator), candidate)
         registry.evaluations.append(evaluation)
         screen_objects.append(evaluation)
-        if evaluation.invalid_games == 0 and evaluation.paired_score_delta >= -0.01:
+        if _screen_survives(evaluation, screen_cfg):
             survivors.append(candidate)
 
     heldout_objects: list[EvaluationRecord] = []
@@ -105,6 +121,11 @@ def evaluate_epoch(
         "screen_survivors": len(survivors),
         "promoted_count": len(promoted_ids),
         "seed_offset": seed_offset,
+        "screen_gate": {
+            "min_paired_score_delta": float(screen_cfg.get("min_paired_score_delta", -0.05)),
+            "min_paired_cash_delta": screen_cfg.get("min_paired_cash_delta"),
+            "min_paired_cash_relative_delta": screen_cfg.get("min_paired_cash_relative_delta"),
+        },
         "screen": [row.to_dict() for row in screen_objects],
         "heldout": [row.to_dict() for row in heldout_objects],
         "decisions": decisions,

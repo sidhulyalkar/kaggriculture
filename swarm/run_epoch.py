@@ -11,6 +11,7 @@ from uuid import uuid4
 
 from .builder import candidate_build_prompt, materialize_candidate
 from .config_loader import load_config
+from .kaggriculture_evaluator import smoke_candidate
 from .models import ResearchTask
 from .packet import build_packet
 from .parser import parse_claim
@@ -20,6 +21,7 @@ from .safety import check_file
 
 
 CHAMPION_INFORMED_PACKETS = {"champion_counter", "trace_mechanism", "frontier_residual"}
+_BUNDLE_SUFFIXES = {".py", ".json", ".md", ".txt", ".yaml", ".yml"}
 
 
 def _epoch_id() -> str:
@@ -31,15 +33,45 @@ def _read(path: Path) -> str:
     return path.read_text(encoding="utf-8")
 
 
-def _read_agent_source(path: str | None) -> str:
+def _read_agent_bundle(path: str | None) -> str:
+    """Return dependency-complete readable source for an informed parent policy.
+
+    Candidate builders emit a quarantined single-file `main.py`; therefore a
+    multi-file parent must be shown as a bundle with explicit file boundaries,
+    otherwise a model may copy an entry-point import that cannot survive
+    quarantine. Binary/cache/notebook artifacts are intentionally excluded.
+    """
     if not path:
         return ""
     p = Path(path)
-    if p.is_dir():
-        p = p / "main.py"
+    if p.is_file():
+        return "# BUNDLED FILE: main.py\n" + p.read_text(encoding="utf-8", errors="replace")
     if not p.exists():
         raise FileNotFoundError(f"champion source not found: {p}")
-    return p.read_text(encoding="utf-8", errors="replace")
+    main = p / "main.py"
+    if not main.exists():
+        raise FileNotFoundError(f"champion source not found: {main}")
+    files = sorted(
+        child
+        for child in p.rglob("*")
+        if child.is_file()
+        and "__pycache__" not in child.parts
+        and child.suffix.lower() in _BUNDLE_SUFFIXES
+    )
+    sections = [
+        "# DEPENDENCY-COMPLETE CURRENT CONTROL BUNDLE",
+        "# IMPORTANT: generated candidates are quarantined as one main.py.",
+        "# Do not leave imports to sibling files from this bundle. Inline any required parent logic.",
+    ]
+    for child in files:
+        sections.extend(
+            (
+                "",
+                f"## BUNDLED FILE: {child.relative_to(p).as_posix()}",
+                child.read_text(encoding="utf-8", errors="replace"),
+            )
+        )
+    return "\n".join(sections)
 
 
 def _public_context(config: dict[str, Any], epoch_id: str) -> dict[str, Any]:
@@ -84,7 +116,7 @@ def _tasks(
         if packet_kind != "blank_sheet" and feedback:
             evidence_sections.extend(("### PRIOR SCREEN-ONLY COUNCIL FEEDBACK", feedback))
         if packet_kind in CHAMPION_INFORMED_PACKETS and champion_source:
-            evidence_sections.extend(("### EXACT CURRENT CHAMPION SOURCE", "```python", champion_source, "```"))
+            evidence_sections.extend(("### EXACT CURRENT CONTROL BUNDLE", champion_source))
         role_evidence = "\n\n".join(evidence_sections)
         for index in range(int(role["count"])):
             packet = build_packet(
@@ -149,7 +181,7 @@ def run_epoch(
     config = load_config(config_path)
     role_config = {str(role["id"]): role for role in config["roles"]}
     feedback = Path(feedback_path).read_text(encoding="utf-8") if feedback_path else ""
-    champion_source = _read_agent_source(champion_path)
+    champion_source = _read_agent_bundle(champion_path)
     epoch_id = _epoch_id()
     epoch_root = Path(output_root).resolve() / epoch_id
     epoch_root.mkdir(parents=True, exist_ok=False)
@@ -182,6 +214,7 @@ def run_epoch(
         "round_index": round_index,
         "feedback_hash": sha256(feedback.encode("utf-8")).hexdigest() if feedback else None,
         "champion_source_hash": sha256(champion_source.encode("utf-8")).hexdigest() if champion_source else None,
+        "champion_context": "dependency_complete_bundle" if champion_source else None,
         "screen_seed_hash": sha256(
             json.dumps(config["experiments"]["screen"]["seeds"], sort_keys=True).encode("utf-8")
         ).hexdigest(),
@@ -229,6 +262,9 @@ def run_epoch(
 
     packet_by_task = {task.task_id: packet for task, packet in tasks}
     task_by_id = {task.task_id: task for task, _packet in tasks}
+    seen_source_hashes: set[str] = set()
+    smoke_seed = 73 + 10000 * int(round_index)
+
     for task_id, (response, _metadata) in research_results.items():
         task = task_by_id[task_id]
         try:
@@ -286,7 +322,33 @@ def run_epoch(
                 "errors": list(static.errors),
             }
         )
-        if static.ok:
+        if not static.ok:
+            continue
+
+        if candidate.source_hash in seen_source_hashes:
+            registry.reviews.append(
+                {
+                    "task_id": task_id,
+                    "candidate_id": candidate.candidate_id,
+                    "stage": "source_dedup",
+                    "status": "reject",
+                    "source_hash": candidate.source_hash,
+                }
+            )
+            continue
+        seen_source_hashes.add(candidate.source_hash)
+
+        smoke = smoke_candidate(candidate.source_path, seed=smoke_seed)
+        registry.reviews.append(
+            {
+                "task_id": task_id,
+                "candidate_id": candidate.candidate_id,
+                "stage": "runtime_smoke",
+                "status": "pass" if smoke["ok"] else "reject",
+                "smoke": smoke,
+            }
+        )
+        if smoke["ok"]:
             registry.candidates.append(candidate)
 
     validation_errors = registry.validate()

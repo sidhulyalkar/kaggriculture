@@ -28,7 +28,8 @@ jobs:
         with:
           python-version: '3.11'
       - run: python -m pip install --upgrade pip
-      - run: pip install -e .
+      - name: Install swarm and public-frontier client
+        run: pip install -e . 'kagglehub==1.0.2'
       - name: Verify NVIDIA secret is injected
         shell: bash
         run: |
@@ -42,7 +43,7 @@ jobs:
       - name: Summarize result tree
         if: always()
         shell: bash
-        run: find /tmp/swarm-live -maxdepth 4 -type f -printf '%P\n' 2>/dev/null | sort | head -200 || true
+        run: find /tmp/swarm-live -maxdepth 6 -type f -printf '%P\n' 2>/dev/null | sort | head -400 || true
       - name: Upload live swarm evidence
         if: always()
         uses: actions/upload-artifact@v4

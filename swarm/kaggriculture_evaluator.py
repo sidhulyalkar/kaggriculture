@@ -17,7 +17,7 @@ _CONTROL_CACHE: dict[tuple[Any, ...], list[dict[str, Any]]] = {}
 _WORKER = r'''
 from pathlib import Path
 import importlib.util,json,sys,time
-subject_path,opponent_path,repo_root,seed,seat=sys.argv[1],sys.argv[2],Path(sys.argv[3]),int(sys.argv[4]),int(sys.argv[5])
+subject_path,opponent_path,shadow_path,repo_root,seed,seat=sys.argv[1],sys.argv[2],sys.argv[3],Path(sys.argv[4]),int(sys.argv[5]),int(sys.argv[6])
 sys.path[:0]=[str(repo_root),str(repo_root/'src')]
 from kagv2.simulator import Game
 
@@ -26,7 +26,7 @@ def load(path,name):
  if p.is_dir():p=p/'main.py'
  old=list(sys.path);sys.path.insert(0,str(p.parent))
  try:
-  spec=importlib.util.spec_from_file_location(name,str(p));m=importlib.util.module_from_spec(spec);spec.loader.exec_module(m)
+  spec=importlib.util.spec_from_file_location(name,str(p));m=importlib.util.module_from_spec(spec);sys.modules[name]=m;spec.loader.exec_module(m)
  finally:sys.path[:]=old
  f=getattr(m,'agent',None)
  if not callable(f):raise RuntimeError('no callable agent in '+str(p))
@@ -39,22 +39,40 @@ def call(f,obs):
 def passive(obs,configuration=None):
  return {'farmer':['PASS'],'hands':[],'market':[]}
 
+def physical_key(out):
+ if not isinstance(out,dict):return ('INVALID',repr(out))
+ farmer=out.get('farmer',[]);hands=out.get('hands',[])
+ try:farmer=json.dumps(farmer,sort_keys=True,separators=(',',':'))
+ except Exception:farmer=repr(farmer)
+ try:hands=json.dumps(hands,sort_keys=True,separators=(',',':'))
+ except Exception:hands=repr(hands)
+ return (farmer,hands)
+
 try:
  sm,S=load(subject_path,'subject')
+ H=None
+ if shadow_path!='__NONE__':_,H=load(shadow_path,'shadow')
  if opponent_path=='__PASSIVE__':O=passive
  else:_,O=load(opponent_path,'opponent')
- timings=[]
+ timings=[];shadow_calls=0;physical_mismatch=0
  def timed(obs,configuration=None):
+  global shadow_calls,physical_mismatch
   t=time.perf_counter()
-  try:return call(S,obs)
+  try:
+   result=call(S,obs)
+   if H is not None:
+    ref=call(H,obs);shadow_calls+=1
+    if physical_key(result)!=physical_key(ref):physical_mismatch+=1
+   return result
   finally:timings.append(time.perf_counter()-t)
  agents=[timed,O] if seat==0 else [O,timed]
  money=Game(seed=seed).run(agents);sc,oc=(money[0],money[1]) if seat==0 else (money[1],money[0])
- stats=getattr(sm,'_V44_STATS',{}) or {};calls=max(1,int(stats.get('calls',0) or 0))
- physical=float(stats.get('physical_changed',0) or 0)/calls if stats else 1.0
- print(json.dumps({'ok':True,'cash':float(sc),'opp_cash':float(oc),'score':1.0 if sc>oc else .5 if sc==oc else 0.0,'margin':float(sc-oc),'mean_ms':1000*sum(timings)/max(1,len(timings)),'physical_change_rate':physical}))
+ if H is not None:physical=float(physical_mismatch)/max(1,shadow_calls)
+ else:
+  stats=getattr(sm,'_V44_STATS',{}) or {};calls=max(1,int(stats.get('calls',0) or 0));physical=float(stats.get('physical_changed',0) or 0)/calls if stats else 0.0
+ print(json.dumps({'ok':True,'cash':float(sc),'opp_cash':float(oc),'score':1.0 if sc>oc else .5 if sc==oc else 0.0,'margin':float(sc-oc),'mean_ms':1000*sum(timings)/max(1,len(timings)),'physical_change_rate':physical,'shadow_calls':shadow_calls}))
 except BaseException as exc:
- print(json.dumps({'ok':False,'error':repr(exc),'mean_ms':0.0,'physical_change_rate':1.0}))
+ print(json.dumps({'ok':False,'error':repr(exc),'mean_ms':0.0,'physical_change_rate':1.0,'shadow_calls':0}))
 '''
 
 
@@ -78,8 +96,16 @@ def _opponent_paths(champion_path: str) -> dict[str, str | None]:
     return mapping
 
 
-def _run_paths(subject_path: str, opponent_path: str | None, seed: int, seat: int) -> dict[str, Any]:
+def _run_paths(
+    subject_path: str,
+    opponent_path: str | None,
+    seed: int,
+    seat: int,
+    *,
+    shadow_path: str | None = None,
+) -> dict[str, Any]:
     opponent_arg = "__PASSIVE__" if opponent_path is None else opponent_path
+    shadow_arg = "__NONE__" if shadow_path is None else _main_path(shadow_path)
     timeout_s = int(os.environ.get("SWARM_GAME_TIMEOUT_S", "180"))
     try:
         process = subprocess.run(
@@ -89,6 +115,7 @@ def _run_paths(subject_path: str, opponent_path: str | None, seed: int, seat: in
                 _WORKER,
                 _main_path(subject_path),
                 opponent_arg,
+                shadow_arg,
                 str(_REPO_ROOT),
                 str(seed),
                 str(seat),
@@ -113,12 +140,7 @@ def _run_paths(subject_path: str, opponent_path: str | None, seed: int, seat: in
 
 
 def smoke_candidate(candidate_path: str, *, seed: int = 73) -> dict[str, Any]:
-    """Cheap executable gate before a generated policy can enter a tournament.
-
-    A candidate must complete one full episode against a passive policy from
-    both seats. This catches missing imports, invalid action shapes, hangs and
-    gross runtime failures before the much larger screen matrix is scheduled.
-    """
+    """Cheap executable gate before a generated policy can enter a tournament."""
     rows = [_run_paths(candidate_path, None, seed, seat) for seat in (0, 1)]
     ok = all(bool(row.get("ok")) for row in rows)
     return {
@@ -137,6 +159,8 @@ def _family_rows(
     opponents: dict[str, str | None],
     seeds: list[int],
     both_seats: bool,
+    *,
+    shadow_path: str | None = None,
 ) -> list[dict[str, Any]]:
     seats = (0, 1) if both_seats else (0,)
     jobs = [(family, opponent, seed, seat) for family, opponent in opponents.items() for seed in seeds for seat in seats]
@@ -144,7 +168,14 @@ def _family_rows(
     workers = max(1, int(os.environ.get("SWARM_EVAL_WORKERS", "4")))
     with ThreadPoolExecutor(max_workers=workers) as executor:
         futures = {
-            executor.submit(_run_paths, subject_path, opponent, seed, seat): (family, seed, seat)
+            executor.submit(
+                _run_paths,
+                subject_path,
+                opponent,
+                seed,
+                seat,
+                shadow_path=shadow_path,
+            ): (family, seed, seat)
             for family, opponent, seed, seat in jobs
         }
         for future in as_completed(futures):
@@ -187,7 +218,13 @@ def evaluate_candidate(
     stage: str,
 ) -> dict[str, Any]:
     opponents = _opponent_paths(champion_path)
-    candidate_rows = _family_rows(candidate_path, opponents, seeds, both_seats)
+    candidate_rows = _family_rows(
+        candidate_path,
+        opponents,
+        seeds,
+        both_seats,
+        shadow_path=champion_path,
+    )
     champion_rows = _control_rows(champion_path, opponents, seeds, both_seats)
     champion_key = {(r["family"], r["seed"], r["seat"]): r for r in champion_rows if r.get("ok")}
 
@@ -222,6 +259,7 @@ def evaluate_candidate(
     mean_ms_values = [float(row["mean_ms"]) for row in candidate_rows if row.get("ok")]
     physical_values = [float(row["physical_change_rate"]) for row in candidate_rows if row.get("ok")]
     physical_divergence = statistics.mean(physical_values) if physical_values else 1.0
+    shadow_calls = sum(int(row.get("shadow_calls", 0)) for row in candidate_rows if row.get("ok"))
     fingerprint = tuple(candidate_family_scores[name] for name in sorted(candidate_family_scores))
     worst_family_delta = min(mean_family_deltas.values(), default=-1.0)
     target_family = max(mean_family_deltas, key=mean_family_deltas.get) if mean_family_deltas else None
@@ -247,5 +285,7 @@ def evaluate_candidate(
             "target_family_gain": target_family_gain,
             "paired_games": len(paired_deltas),
             "game_count": len(candidate_rows),
+            "shadow_control_calls": shadow_calls,
+            "physical_divergence_method": "same-observation-shadow-control",
         },
     }

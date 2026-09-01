@@ -13,7 +13,7 @@ permissions:
 
 concurrency:
   group: nvidia-swarm-live-${{ github.ref }}
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 jobs:
   run:

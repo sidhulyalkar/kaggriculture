@@ -2,10 +2,10 @@ from pathlib import Path
 
 import pytest
 
-from swarm.builder import extract_main_py
+from swarm.builder import extract_main_py, materialize_candidate
 from swarm.config_loader import validate_config
 from swarm.kaggriculture_evaluator import smoke_candidate
-from swarm.models import EvaluationRecord
+from swarm.models import EvaluationRecord, ExperimentClaim
 from swarm.parser import parse_claim
 from swarm.promotion import promotion_decision
 from swarm.run_epoch import _read_agent_bundle
@@ -72,7 +72,41 @@ def test_agent_bundle_includes_dependencies(tmp_path: Path):
     bundle = _read_agent_bundle(str(root))
     assert "BUNDLED FILE: main.py" in bundle
     assert "BUNDLED FILE: helper.py" in bundle
-    assert "quarantined as one main.py" in bundle
+    assert "copied byte-for-byte" in bundle
+
+
+def test_materialize_candidate_preserves_trusted_parent(tmp_path: Path):
+    parent = tmp_path / "parent"
+    parent.mkdir()
+    (parent / "helper.py").write_text(
+        "def parent(obs, cfg=None): return {'farmer':['PASS'],'hands':[],'market':[]}\n",
+        encoding="utf-8",
+    )
+    (parent / "main.py").write_text("from helper import parent as agent\n", encoding="utf-8")
+    claim = ExperimentClaim(
+        claim_id="claim-1",
+        task_id="task-1",
+        hypothesis="wrapper",
+        mechanism="delegate",
+        code_change="root wrapper",
+        expected_failure_mode="none",
+        screen_test="smoke",
+        heldout_test="new seeds",
+        predicted_effect="parity",
+    )
+    response = "## MAIN_PY\n```python\nfrom helper import parent as _parent\ndef agent(obs, cfg=None):\n    return _parent(obs, cfg)\n```"
+    candidate = materialize_candidate(
+        response=response,
+        claim=claim,
+        role="residual",
+        lane="frontier_improvement",
+        parent_policy="control",
+        output_root=tmp_path / "candidates",
+        trusted_parent_root=parent,
+    )
+    candidate_root = Path(candidate.source_path).parent
+    assert (candidate_root / "helper.py").read_text(encoding="utf-8") == (parent / "helper.py").read_text(encoding="utf-8")
+    assert "_parent" in Path(candidate.source_path).read_text(encoding="utf-8")
 
 
 def test_runtime_smoke_accepts_minimal_passive_agent(tmp_path: Path):

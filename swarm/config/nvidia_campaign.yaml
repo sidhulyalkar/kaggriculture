@@ -87,13 +87,24 @@ experiments:
   screen:
     seeds: [101, 103, 107, 109]
     both_seats: true
+    min_paired_score_delta: -0.05
+    min_paired_cash_delta: -1000.0
+    min_paired_cash_relative_delta: -0.02
   heldout:
     seeds: [211, 223, 227, 229, 233, 239]
     both_seats: true
     sealed: true
   promotion:
-    min_paired_score_delta: 0.02
-    min_worst_family_delta: -0.03
+    # Bank cash is the engine's terminal reward. Win/loss is retained only as a
+    # secondary robustness gate because profitable improvements need not flip a
+    # binary matchup on every seed.
+    min_paired_score_delta: -0.01
+    min_worst_family_delta: -0.05
+    min_paired_cash_delta: 100.0
+    min_median_paired_cash_delta: 0.0
+    min_paired_cash_relative_delta: 0.002
+    min_worst_family_cash_delta: -1500.0
+    min_worst_family_cash_relative_delta: -0.03
     min_passive_cash_ratio: 0.97
     max_invalid_games: 0
     max_mean_call_ms: 100.0

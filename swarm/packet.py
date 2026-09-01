@@ -19,6 +19,7 @@ PACKET_FILES: dict[str, tuple[str, ...]] = {
     "blank_sheet": (
         "docs/ENGINE_CONTRACT.md",
         "docs/ARCHITECTURE.md",
+        "baselines/v1/main.py",
         "docs/PUBLIC_APPROACHES_AND_STRATEGY.md",
     ),
     "champion_counter": (
@@ -39,6 +40,7 @@ PACKET_FILES: dict[str, tuple[str, ...]] = {
     "open_exploration": (
         "docs/ENGINE_CONTRACT.md",
         "docs/ARCHITECTURE.md",
+        "baselines/v1/main.py",
         "docs/PUBLIC_APPROACHES_AND_STRATEGY.md",
     ),
     "evidence_only": (

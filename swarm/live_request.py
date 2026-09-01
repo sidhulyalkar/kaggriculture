@@ -54,12 +54,23 @@ def _acquire_if_requested(request: dict[str, Any], root: Path) -> dict[str, Any]
 
 def _resolve_experiment_scope(request: dict[str, Any], root: Path, acquisition: dict[str, Any] | None) -> tuple[str, dict[str, str], str, str | None]:
     champion_path = str(request.get("champion_path", "submission")); opponents: dict[str, str] = {}; scope = "repo_local_control"; champion_family: str | None = None
+    control_selection_basis = "request_path"
     if acquisition:
-        scope = str(acquisition.get("scope", "acquisition_unknown")); resources = acquisition.get("resources", {}); v32 = resources.get("v32", {})
-        if v32.get("status") == "ready": champion_path = str(v32["agent_root"]); champion_family = "v32"
+        scope = str(acquisition.get("scope", "acquisition_unknown")); resources = acquisition.get("resources", {})
+        preferred = str(request.get("preferred_public_champion", "")).strip()
+        if preferred:
+            row = resources.get(preferred, {})
+            if row.get("status") != "ready":
+                raise RuntimeError(f"preferred public champion {preferred!r} was not acquired successfully")
+            champion_path = str(row["agent_root"]); champion_family = preferred; control_selection_basis = "explicit_leaderboard_informed_override"
         else:
-            public_champion = acquisition.get("recommended_public_champion"); row = resources.get(str(public_champion), {}) if public_champion else {}
-            if row.get("status") == "ready": champion_path = str(row["agent_root"]); champion_family = str(public_champion)
+            v32 = resources.get("v32", {})
+            if v32.get("status") == "ready":
+                champion_path = str(v32["agent_root"]); champion_family = "v32"; control_selection_basis = "verified_v32"
+            else:
+                public_champion = acquisition.get("recommended_public_champion"); row = resources.get(str(public_champion), {}) if public_champion else {}
+                if row.get("status") == "ready":
+                    champion_path = str(row["agent_root"]); champion_family = str(public_champion); control_selection_basis = "local_public_crossplay"
         for family in acquisition.get("ready_public_families", []):
             if str(family) == champion_family: continue
             row = resources.get(family, {})
@@ -70,7 +81,7 @@ def _resolve_experiment_scope(request: dict[str, Any], root: Path, acquisition: 
         opponents.update({str(name): str(path) for name, path in requested.items()})
     local_sentinel = Path("submission/base_controller.py")
     if local_sentinel.exists() and Path(champion_path).resolve() != Path("submission").resolve(): opponents.setdefault("repo_deterministic", str(local_sentinel))
-    (root / "EXPERIMENT_SCOPE.json").write_text(json.dumps({"scope": scope, "champion_family": champion_family, "champion_path": champion_path, "opponents": opponents}, indent=2, sort_keys=True), encoding="utf-8")
+    (root / "EXPERIMENT_SCOPE.json").write_text(json.dumps({"scope": scope, "champion_family": champion_family, "control_selection_basis": control_selection_basis, "champion_path": champion_path, "opponents": opponents}, indent=2, sort_keys=True), encoding="utf-8")
     return champion_path, opponents, scope, champion_family
 
 
@@ -95,7 +106,7 @@ def execute_request(*, request_path: str, output_root: str) -> dict[str, Any]:
         if opponents: os.environ["SWARM_OPPONENTS_JSON"] = json.dumps(opponents, sort_keys=True)
         else: os.environ.pop("SWARM_OPPONENTS_JSON", None)
         campaign_root = run_campaign(config_path=config_path, repo_root=".", output_root=str(root), champion_path=champion_path, epochs=epochs, dry_run=False)
-        result.update({"frontier": acquisition, "frontier_scope": frontier_scope, "champion_family": champion_family, "champion_path": champion_path, "champion_tree_sha256": champion_hash, "opponents": opponents, "epochs": epochs, "campaign_root": str(campaign_root)})
+        result.update({"frontier": acquisition, "frontier_scope": frontier_scope, "champion_family": champion_family, "preferred_public_champion": request.get("preferred_public_champion"), "champion_path": champion_path, "champion_tree_sha256": champion_hash, "opponents": opponents, "epochs": epochs, "campaign_root": str(campaign_root)})
         if bool(request.get("qualify_submission", True)):
             result["submission_qualification"] = qualify_campaign(campaign_root=campaign_root, config_path=config_path, champion_path=champion_path, output_root=root / "submission", frontier_scope=frontier_scope, max_confirmation_candidates=int(request.get("max_confirmation_candidates", 3)))
     else: raise ValueError(f"unknown live request mode {mode!r}")

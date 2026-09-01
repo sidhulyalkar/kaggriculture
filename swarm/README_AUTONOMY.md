@@ -3,9 +3,21 @@
 V45 splits autonomy into two trust domains:
 
 1. **Research domain** — frontier models generate independent hypotheses and complete candidate `main.py` files.
-2. **Evidence domain** — deterministic code performs static checks, tournament screening, sealed evaluation, and promotion.
+2. **Evidence domain** — deterministic code performs static checks, paired tournament screening, sealed evaluation, and promotion.
 
 This separation is intentional. A research model cannot alter held-out seeds, promotion thresholds, or its own evaluation record.
+
+## Current research population
+
+The default config deliberately uses different model families for different jobs:
+
+- GPT-5.6 Sol: blank-sheet architecture and chief-scientist review.
+- DeepSeek V4 Pro 0813 through NVIDIA NIM: adversarial counter-policy search and audit.
+- NVIDIA Nemotron 3 Ultra 550B: mechanism research and council review.
+- Kimi K3 through NVIDIA NIM: protected-frontier residual search.
+- NVIDIA Nemotron 3.5 Lightning 30B A3B: high-throughput exploration.
+
+Provider/model selection is configuration, not code. Any role can be reassigned without changing the evidence pipeline.
 
 ## Commands
 
@@ -15,9 +27,9 @@ This separation is intentional. A research model cannot alter held-out seeds, pr
 python -m swarm.run_epoch --config swarm/config/default.yaml --dry-run
 ```
 
-This exports all role-specific requests to `swarm/runs/<epoch>/outbox/` and validates the information firewall.
+This exports all role-specific requests to `swarm/runs/<epoch>/outbox/`, validates the information firewall, and is exercised in CI.
 
-### 2. Run live research/build generation
+### 2. Run one live research/build epoch
 
 ```bash
 export OPENAI_API_KEY=...
@@ -27,35 +39,66 @@ python -m swarm.run_epoch --config swarm/config/default.yaml
 
 Generated candidates are quarantined under `swarm/runs/<epoch>/candidates/`. They are not copied into `submission/` and are not automatically submitted.
 
-### 3. Evaluate candidates
+### 3. Evaluate candidates with the built-in Kaggriculture adapter
 
 ```bash
+export SWARM_OPPONENTS_JSON='{"soil":"/agents/soil/main.py","moon":"/agents/moon/main.py","adaptive":"/agents/adaptive/main.py"}'
 python -m swarm.evaluate_epoch \
   swarm/runs/<epoch> \
   --config swarm/config/default.yaml \
-  --evaluator your.module:evaluate_candidate \
-  --champion-path path/to/current_champion/main.py
+  --champion-path /agents/champion/main.py
 ```
 
-The evaluator adapter must return the normalized evidence fields described in `swarm/experiment_adapter.py`. This lets the swarm use the existing local league, Kaggle notebook tournament outputs, or a future faster simulator without changing research orchestration.
+`SWARM_OPPONENTS_JSON` is optional. Without it, the evaluator still runs candidate/champion/passive controls. For serious qualification, point it at the family-normalized opponent zoo. Each game imports fresh agent modules, matching the isolation philosophy of the V44 tournament worker.
 
-### 4. Inspect portfolio
+### 4. Convene the independent council
 
-`EPOCH_EVALUATION.json` contains the five-role portfolio: champion, counter, architecture, robust, and explorer. A slot remains null when no candidate passes the hard promotion gate.
+```bash
+python -m swarm.review_epoch swarm/runs/<epoch>
+```
 
-## Autonomous cadence
+The council receives **screen evidence only**. Its `NEXT_EPOCH_HINTS.json` may be released to the next research round. Sealed held-out evidence is never turned into research feedback.
 
-A practical unattended epoch is:
+### 5. Run a complete autonomous campaign
 
-- generate independent claims in parallel;
-- build candidates from frozen claims;
-- reject unsafe/invalid source statically;
-- screen both seats on public screen seeds;
-- evaluate survivors on sealed seeds;
-- apply deterministic promotion gates;
-- send evidence summaries to independent council reviewers;
-- prioritize disagreement for replication;
-- release mechanism hints to lagging research lanes in the next epoch;
-- only then prepare submission artifacts.
+```bash
+python -m swarm.run_campaign \
+  --champion-path /agents/champion/main.py \
+  --epochs 3
+```
 
-Kaggle submission remains an explicit outer action because leaderboard submissions are scarce experimental measurements and should not be burned by an unconstrained generator.
+A campaign performs, for each round:
+
+1. independent role-specific research;
+2. frozen-claim candidate generation;
+3. static source quarantine;
+4. paired screen evaluation;
+5. sealed held-out evaluation and deterministic promotion;
+6. screen-only council review;
+7. controlled mechanism-hint release to the next round.
+
+Screen and held-out seed sets are shifted by `10000 * round`, so successive epochs do not repeatedly measure the exact same episodes. Blank-sheet architects do not receive cross-agent hints and remain an explicit diversity reservoir.
+
+## Five-slot experimental portfolio
+
+`EPOCH_EVALUATION.json` emits a portfolio rather than five correlated variants:
+
+- `champion`: strongest promoted candidate by overall evidence;
+- `counter`: strongest targeted family gain;
+- `architecture`: strongest independently developed architecture;
+- `robust`: strongest worst-family candidate;
+- `explorer`: highest-novelty promoted candidate.
+
+A slot stays null when no candidate clears its hard gate. `HOLD` is a valid scientific result.
+
+## Safety and anti-overfit boundaries
+
+- Workers never receive held-out seed values.
+- Held-out results are not fed back into research prompts.
+- Cross-agent information release begins at mechanism-level hints, not source copying.
+- Blank-sheet architecture workers remain isolated from prior implementation hints.
+- Generated source is quarantined and statically checked before execution.
+- Network/LLM libraries and dynamic `eval`/`exec` are rejected in generated submissions.
+- Promotion is deterministic and lane-aware; models cannot vote themselves into the champion slot.
+- The current champion is fixed as the control during a campaign.
+- Kaggle submission remains an explicit outer action because leaderboard submissions are scarce experimental measurements.

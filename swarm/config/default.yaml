@@ -77,6 +77,13 @@ roles:
     independent: true
     build_candidate: false
 
+council:
+  reviewers:
+    - chief_scientist
+    - auditor
+    - mechanism
+  research_feedback_boundary: screen_only
+
 experiments:
   screen:
     seeds: [101, 103, 107, 109]

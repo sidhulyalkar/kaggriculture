@@ -34,10 +34,12 @@ This exports all role-specific requests to `swarm/runs/<epoch>/outbox/`, validat
 ```bash
 export OPENAI_API_KEY=...
 export NVIDIA_API_KEY=...
-python -m swarm.run_epoch --config swarm/config/default.yaml
+python -m swarm.run_epoch \
+  --config swarm/config/default.yaml \
+  --champion-path /agents/champion/main.py
 ```
 
-Generated candidates are quarantined under `swarm/runs/<epoch>/candidates/`. They are not copied into `submission/` and are not automatically submitted.
+The exact champion source is exposed only to champion-informed counter/mechanism/residual roles. Blank-sheet architecture workers remain isolated from it. Generated candidates are quarantined under `swarm/runs/<epoch>/candidates/`; they are not copied into `submission/` and are not automatically submitted.
 
 ### 3. Evaluate candidates with the built-in Kaggriculture adapter
 
@@ -49,7 +51,7 @@ python -m swarm.evaluate_epoch \
   --champion-path /agents/champion/main.py
 ```
 
-`SWARM_OPPONENTS_JSON` is optional. Without it, the evaluator still runs candidate/champion/passive controls. For serious qualification, point it at the family-normalized opponent zoo. Each game imports fresh agent modules, matching the isolation philosophy of the V44 tournament worker.
+`SWARM_OPPONENTS_JSON` is optional. Without it, the evaluator still runs candidate/champion/passive controls. For serious qualification, point it at the family-normalized opponent zoo. Each game loads fresh agent modules in a timeout-bounded subprocess, matching the isolation philosophy of the V44 tournament worker.
 
 ### 4. Convene the independent council
 
@@ -83,22 +85,24 @@ Screen and held-out seed sets are shifted by `10000 * round`, so successive epoc
 
 `EPOCH_EVALUATION.json` emits a portfolio rather than five correlated variants:
 
-- `champion`: strongest promoted candidate by overall evidence;
+- `champion`: strongest promoted candidate by overall evidence, otherwise `CURRENT_CHAMPION`;
 - `counter`: strongest targeted family gain;
 - `architecture`: strongest independently developed architecture;
 - `robust`: strongest worst-family candidate;
 - `explorer`: highest-novelty promoted candidate.
 
-A slot stays null when no candidate clears its hard gate. `HOLD` is a valid scientific result.
+Non-champion slots stay null when no candidate clears their hard gate. `HOLD` is a valid scientific result.
 
 ## Safety and anti-overfit boundaries
 
 - Workers never receive held-out seed values.
 - Held-out results are not fed back into research prompts.
 - Cross-agent information release begins at mechanism-level hints, not source copying.
-- Blank-sheet architecture workers remain isolated from prior implementation hints.
+- Blank-sheet architecture workers remain isolated from prior implementation hints and champion source.
 - Generated source is quarantined and statically checked before execution.
-- Network/LLM libraries and dynamic `eval`/`exec` are rejected in generated submissions.
+- Network/LLM libraries, subprocess launchers, `eval`, dynamic imports, and runtime-generated `exec` are rejected in generated submissions.
+- V44-style embedded parent code is allowed only when the executed source is statically recoverable and recursively passes the same safety policy.
+- Every game executes in a timeout-bounded subprocess.
 - Promotion is deterministic and lane-aware; models cannot vote themselves into the champion slot.
 - The current champion is fixed as the control during a campaign.
 - Kaggle submission remains an explicit outer action because leaderboard submissions are scarce experimental measurements.

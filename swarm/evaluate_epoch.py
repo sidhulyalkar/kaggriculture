@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import argparse
+from dataclasses import replace
 import json
 from pathlib import Path
 
 from .config_loader import load_config
 from .experiment_adapter import EvaluationRequest, evaluate_with_callable
-from .models import CandidateRecord
+from .models import CandidateRecord, EvaluationRecord
+from .novelty import novelty_score
 from .promotion import promotion_decision, select_portfolio
 from .registry import SwarmRegistry
 
@@ -26,6 +28,12 @@ def _candidate_from_row(row: dict) -> CandidateRecord:
     )
 
 
+def _with_metadata(evaluation: EvaluationRecord, candidate: CandidateRecord, **extra) -> EvaluationRecord:
+    metadata = dict(evaluation.metadata)
+    metadata.update({"lane": candidate.lane, "role": candidate.role, **extra})
+    return replace(evaluation, metadata=metadata)
+
+
 def evaluate_epoch(
     *,
     epoch_root: str,
@@ -39,7 +47,7 @@ def evaluate_epoch(
     candidates = [_candidate_from_row(row) for row in registry.candidates.read()]
     thresholds = config["experiments"]["promotion"]
 
-    screen_rows = []
+    screen_objects: list[EvaluationRecord] = []
     survivors: list[CandidateRecord] = []
     for candidate in candidates:
         request = EvaluationRequest(
@@ -50,15 +58,13 @@ def evaluate_epoch(
             seeds=tuple(int(x) for x in config["experiments"]["screen"]["seeds"]),
             both_seats=bool(config["experiments"]["screen"]["both_seats"]),
         )
-        evaluation = evaluate_with_callable(request, evaluator)
+        evaluation = _with_metadata(evaluate_with_callable(request, evaluator), candidate)
         registry.evaluations.append(evaluation)
-        screen_rows.append(evaluation.to_dict())
-        # Screen is intentionally permissive. It rejects runtime failures and severe regressions;
-        # the sealed gate remains the actual promotion test.
+        screen_objects.append(evaluation)
         if evaluation.invalid_games == 0 and evaluation.paired_score_delta >= -0.01:
             survivors.append(candidate)
 
-    heldout_rows = []
+    heldout_objects: list[EvaluationRecord] = []
     decisions = []
     promoted_ids: set[str] = set()
     for candidate in survivors:
@@ -70,44 +76,26 @@ def evaluate_epoch(
             seeds=tuple(int(x) for x in config["experiments"]["heldout"]["seeds"]),
             both_seats=bool(config["experiments"]["heldout"]["both_seats"]),
         )
-        evaluation = evaluate_with_callable(request, evaluator)
+        evaluation = _with_metadata(evaluate_with_callable(request, evaluator), candidate)
+        population = [row.behavioral_fingerprint for row in heldout_objects if row.behavioral_fingerprint]
+        novelty = novelty_score(evaluation.behavioral_fingerprint, population) if evaluation.behavioral_fingerprint else 0.0
+        evaluation = _with_metadata(evaluation, candidate, novelty=novelty)
         registry.evaluations.append(evaluation)
-        heldout_rows.append(evaluation.to_dict())
-        decision = promotion_decision(evaluation, thresholds)
+        heldout_objects.append(evaluation)
+        decision = promotion_decision(evaluation, thresholds, lane=candidate.lane)
         registry.promotions.append(decision)
         decisions.append(decision.to_dict())
         if decision.promote:
             promoted_ids.add(candidate.candidate_id)
 
-    heldout_eval_objects = [
-        evaluate_with_callable(
-            EvaluationRequest(
-                candidate_id="__never__",
-                candidate_path="",
-                champion_path="",
-                stage="__never__",
-                seeds=(),
-                both_seats=False,
-            ),
-            evaluator,
-        )
-        for _ in ()
-    ]
-    # Rehydrate without triggering evaluator calls; the empty comprehension above pins type shape.
-    from .experiment_adapter import normalize_evaluation
-
-    heldout_eval_objects = [
-        normalize_evaluation(str(row["candidate_id"]), "heldout", row) for row in heldout_rows
-    ]
     slots = list(config["submission_portfolio"]["slots"])
-    portfolio = select_portfolio(heldout_eval_objects, promoted_ids, slots)
-
+    portfolio = select_portfolio(heldout_objects, promoted_ids, slots)
     summary = {
         "candidate_count": len(candidates),
         "screen_survivors": len(survivors),
         "promoted_count": len(promoted_ids),
-        "screen": screen_rows,
-        "heldout": heldout_rows,
+        "screen": [row.to_dict() for row in screen_objects],
+        "heldout": [row.to_dict() for row in heldout_objects],
         "decisions": decisions,
         "portfolio": portfolio,
     }
@@ -119,7 +107,11 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Evaluate a Kaggriculture swarm epoch")
     parser.add_argument("epoch_root")
     parser.add_argument("--config", default="swarm/config/default.yaml")
-    parser.add_argument("--evaluator", required=True, help="module:function evaluator adapter")
+    parser.add_argument(
+        "--evaluator",
+        default="swarm.kaggriculture_evaluator:evaluate_candidate",
+        help="module:function evaluator adapter",
+    )
     parser.add_argument("--champion-path", required=True)
     args = parser.parse_args()
     summary = evaluate_epoch(

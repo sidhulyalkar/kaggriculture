@@ -24,6 +24,13 @@ def _thresholds_for_lane(thresholds: dict[str, Any], lane: str | None) -> dict[s
     return resolved
 
 
+def _cash_metric(evaluation: EvaluationRecord, key: str, default: float) -> float:
+    try:
+        return float(evaluation.metadata.get(key, default))
+    except (TypeError, ValueError):
+        return default
+
+
 def promotion_decision(
     evaluation: EvaluationRecord,
     thresholds: dict[str, Any],
@@ -32,23 +39,49 @@ def promotion_decision(
 ) -> PromotionDecision:
     gate = _thresholds_for_lane(thresholds, lane or str(evaluation.metadata.get("lane", "")))
     reasons: list[str] = []
-    checks = (
+    checks: list[tuple[bool, str]] = [
         (evaluation.paired_score_delta >= float(gate["min_paired_score_delta"]), "paired score delta"),
-        (evaluation.worst_family_delta >= float(gate["min_worst_family_delta"]), "worst-family delta"),
+        (evaluation.worst_family_delta >= float(gate["min_worst_family_delta"]), "worst-family score delta"),
         (evaluation.passive_cash_ratio >= float(gate["min_passive_cash_ratio"]), "passive cash ratio"),
         (evaluation.invalid_games <= int(gate["max_invalid_games"]), "invalid games"),
         (evaluation.mean_call_ms <= float(gate["max_mean_call_ms"]), "mean call time"),
         (evaluation.physical_divergence <= float(gate["max_physical_divergence"]), "physical divergence"),
+    ]
+
+    cash_checks = (
+        ("min_paired_cash_delta", "paired_cash_delta", "paired cash delta"),
+        ("min_median_paired_cash_delta", "median_paired_cash_delta", "median paired cash delta"),
+        ("min_paired_cash_relative_delta", "paired_cash_relative_delta", "paired relative cash delta"),
+        ("min_worst_family_cash_delta", "worst_family_cash_delta", "worst-family cash delta"),
+        (
+            "min_worst_family_cash_relative_delta",
+            "worst_family_cash_relative_delta",
+            "worst-family relative cash delta",
+        ),
     )
+    for threshold_key, metadata_key, label in cash_checks:
+        if threshold_key in gate:
+            value = _cash_metric(evaluation, metadata_key, float("-inf"))
+            checks.append((value >= float(gate[threshold_key]), label))
+
     for passed, label in checks:
         if not passed:
             reasons.append(f"failed {label}")
 
-    # Ranking score only. Promotion still requires every hard gate.
+    paired_cash_relative = _cash_metric(evaluation, "paired_cash_relative_delta", 0.0)
+    worst_cash_relative = _cash_metric(evaluation, "worst_family_cash_relative_delta", 0.0)
+    median_cash = _cash_metric(evaluation, "median_paired_cash_delta", 0.0)
+    cash_scale = max(1.0, abs(_cash_metric(evaluation, "mean_control_cash", 1.0)))
+
+    # Ranking is cash-first because the engine's terminal reward is bank cash.
+    # Promotion still requires every hard gate above.
     score = (
-        evaluation.paired_score_delta
-        + 0.35 * evaluation.worst_family_delta
-        + 0.10 * (evaluation.passive_cash_ratio - 1.0)
+        1.00 * paired_cash_relative
+        + 0.35 * worst_cash_relative
+        + 0.10 * (median_cash / cash_scale)
+        + 0.10 * evaluation.paired_score_delta
+        + 0.05 * evaluation.worst_family_delta
+        + 0.05 * (evaluation.passive_cash_ratio - 1.0)
         - 0.001 * evaluation.invalid_games
         - 0.001 * max(0.0, evaluation.mean_call_ms - 25.0)
         - 0.05 * evaluation.physical_divergence
@@ -67,8 +100,23 @@ def select_portfolio(
     slots: list[str],
 ) -> dict[str, str | None]:
     eligible = [row for row in evaluations if row.candidate_id in promoted_ids]
-    by_mean = sorted(eligible, key=lambda row: row.mean_score, reverse=True)
-    by_robust = sorted(eligible, key=lambda row: row.worst_family_delta, reverse=True)
+    by_mean = sorted(
+        eligible,
+        key=lambda row: (
+            _cash_metric(row, "paired_cash_relative_delta", float("-inf")),
+            _cash_metric(row, "paired_cash_delta", float("-inf")),
+            row.mean_score,
+        ),
+        reverse=True,
+    )
+    by_robust = sorted(
+        eligible,
+        key=lambda row: (
+            _cash_metric(row, "worst_family_cash_relative_delta", float("-inf")),
+            _cash_metric(row, "worst_family_cash_delta", float("-inf")),
+        ),
+        reverse=True,
+    )
     by_counter = sorted(eligible, key=lambda row: row.metadata.get("target_family_gain", float("-inf")), reverse=True)
     by_novelty = sorted(eligible, key=lambda row: row.metadata.get("novelty", float("-inf")), reverse=True)
     by_architecture = [row for row in by_mean if row.metadata.get("lane") == "architecture"]

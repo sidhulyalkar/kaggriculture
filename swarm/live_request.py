@@ -20,16 +20,11 @@ def _tree_hash(path: str | Path) -> str:
     if not root.exists():
         raise FileNotFoundError(root)
     digest = sha256()
-    files = sorted(
-        p for p in root.rglob("*") if p.is_file() and "__pycache__" not in p.parts and p.suffix != ".pyc"
-    )
+    files = sorted(p for p in root.rglob("*") if p.is_file() and "__pycache__" not in p.parts and p.suffix != ".pyc")
     for file_path in files:
         relative = file_path.relative_to(root).as_posix().encode("utf-8")
-        digest.update(len(relative).to_bytes(4, "big"))
-        digest.update(relative)
-        data = file_path.read_bytes()
-        digest.update(len(data).to_bytes(8, "big"))
-        digest.update(data)
+        digest.update(len(relative).to_bytes(4, "big")); digest.update(relative)
+        data = file_path.read_bytes(); digest.update(len(data).to_bytes(8, "big")); digest.update(data)
     return digest.hexdigest()
 
 
@@ -48,28 +43,34 @@ def _acquire_if_requested(request: dict[str, Any], root: Path) -> dict[str, Any]
     keys = request.get("frontier_keys")
     if keys is not None and not isinstance(keys, list):
         raise ValueError("frontier_keys must be a list")
-    return acquire_frontier(
-        output_root=root / "frontier",
-        keys=[str(key) for key in keys] if keys else None,
-    )
+    return acquire_frontier(output_root=root / "frontier", keys=[str(key) for key in keys] if keys else None)
 
 
 def _resolve_experiment_scope(
-    request: dict[str, Any],
-    root: Path,
-    acquisition: dict[str, Any] | None,
-) -> tuple[str, dict[str, str], str]:
+    request: dict[str, Any], root: Path, acquisition: dict[str, Any] | None,
+) -> tuple[str, dict[str, str], str, str | None]:
     champion_path = str(request.get("champion_path", "submission"))
     opponents: dict[str, str] = {}
     scope = "repo_local_control"
+    champion_family: str | None = None
 
     if acquisition:
         scope = str(acquisition.get("scope", "acquisition_unknown"))
-        v32 = acquisition.get("resources", {}).get("v32", {})
+        resources = acquisition.get("resources", {})
+        v32 = resources.get("v32", {})
         if v32.get("status") == "ready":
             champion_path = str(v32["agent_root"])
+            champion_family = "v32"
+        else:
+            public_champion = acquisition.get("recommended_public_champion")
+            row = resources.get(str(public_champion), {}) if public_champion else {}
+            if row.get("status") == "ready":
+                champion_path = str(row["agent_root"])
+                champion_family = str(public_champion)
         for family in acquisition.get("ready_public_families", []):
-            row = acquisition.get("resources", {}).get(family, {})
+            if str(family) == champion_family:
+                continue
+            row = resources.get(family, {})
             if row.get("status") == "ready":
                 opponents[str(family)] = str(row["agent_root"])
 
@@ -79,24 +80,17 @@ def _resolve_experiment_scope(
             raise ValueError("opponents must be a mapping of family name to path")
         opponents.update({str(name): str(path) for name, path in requested.items()})
 
-    # Keep one deterministic in-repo family in the zoo as a regression sentinel.
     local_sentinel = Path("submission/base_controller.py")
     if local_sentinel.exists() and Path(champion_path).resolve() != Path("submission").resolve():
         opponents.setdefault("repo_deterministic", str(local_sentinel))
 
-    (root / "EXPERIMENT_SCOPE.json").write_text(
-        json.dumps(
-            {
-                "scope": scope,
-                "champion_path": champion_path,
-                "opponents": opponents,
-            },
-            indent=2,
-            sort_keys=True,
-        ),
-        encoding="utf-8",
-    )
-    return champion_path, opponents, scope
+    (root / "EXPERIMENT_SCOPE.json").write_text(json.dumps({
+        "scope": scope,
+        "champion_family": champion_family,
+        "champion_path": champion_path,
+        "opponents": opponents,
+    }, indent=2, sort_keys=True), encoding="utf-8")
+    return champion_path, opponents, scope, champion_family
 
 
 def execute_request(*, request_path: str, output_root: str) -> dict[str, Any]:
@@ -106,33 +100,18 @@ def execute_request(*, request_path: str, output_root: str) -> dict[str, Any]:
     request_id = str(request.get("request_id", "unnamed"))
     mode = str(request.get("mode", "probe")).lower()
     config_path = str(request.get("config", "swarm/config/nvidia_live.yaml"))
-    root = Path(output_root).resolve()
-    root.mkdir(parents=True, exist_ok=True)
+    root = Path(output_root).resolve(); root.mkdir(parents=True, exist_ok=True)
     _configure_provider_runtime(request)
-    result: dict[str, Any] = {
-        "request_id": request_id,
-        "mode": mode,
-        "config": config_path,
-        "provider_attempts": int(os.environ["SWARM_NVIDIA_ATTEMPTS"]),
-    }
+    result: dict[str, Any] = {"request_id": request_id, "mode": mode, "config": config_path, "provider_attempts": int(os.environ["SWARM_NVIDIA_ATTEMPTS"])}
 
     if mode == "probe":
         os.environ["SWARM_NVIDIA_MAX_TOKENS"] = str(int(request.get("max_tokens", 128)))
-        probe_path = root / "NVIDIA_PROBE.json"
-        result["probe"] = probe_models(
-            config_path=config_path,
-            output_path=str(probe_path),
-            timeout_s=int(request.get("timeout_s", 180)),
-        )
+        result["probe"] = probe_models(config_path=config_path, output_path=str(root / "NVIDIA_PROBE.json"), timeout_s=int(request.get("timeout_s", 180)))
     elif mode == "frontier_probe":
-        acquisition = acquire_frontier(
-            output_root=root / "frontier",
-            keys=[str(key) for key in request.get("frontier_keys", [])] or None,
-        )
-        result["frontier"] = acquisition
+        result["frontier"] = acquire_frontier(output_root=root / "frontier", keys=[str(key) for key in request.get("frontier_keys", [])] or None)
     elif mode in {"epoch", "campaign"}:
         acquisition = _acquire_if_requested(request, root)
-        champion_path, opponents, frontier_scope = _resolve_experiment_scope(request, root, acquisition)
+        champion_path, opponents, frontier_scope, champion_family = _resolve_experiment_scope(request, root, acquisition)
         champion_hash = _tree_hash(champion_path)
         expected = str(request.get("champion_sha256", "")).strip()
         if expected and expected != champion_hash:
@@ -141,44 +120,29 @@ def execute_request(*, request_path: str, output_root: str) -> dict[str, Any]:
         if epochs < 1 or epochs > 5:
             raise ValueError("epochs must be between 1 and 5 for live GitHub execution")
         os.environ["SWARM_NVIDIA_MAX_TOKENS"] = str(int(request.get("max_tokens", 24576)))
-        if opponents:
-            os.environ["SWARM_OPPONENTS_JSON"] = json.dumps(opponents, sort_keys=True)
-        else:
-            os.environ.pop("SWARM_OPPONENTS_JSON", None)
-        campaign_root = run_campaign(
-            config_path=config_path,
-            repo_root=".",
-            output_root=str(root),
-            champion_path=champion_path,
-            epochs=epochs,
-            dry_run=False,
-        )
-        result.update(
-            {
-                "frontier": acquisition,
-                "frontier_scope": frontier_scope,
-                "champion_path": champion_path,
-                "champion_tree_sha256": champion_hash,
-                "opponents": opponents,
-                "epochs": epochs,
-                "campaign_root": str(campaign_root),
-            }
-        )
+        if opponents: os.environ["SWARM_OPPONENTS_JSON"] = json.dumps(opponents, sort_keys=True)
+        else: os.environ.pop("SWARM_OPPONENTS_JSON", None)
+        campaign_root = run_campaign(config_path=config_path, repo_root=".", output_root=str(root), champion_path=champion_path, epochs=epochs, dry_run=False)
+        result.update({
+            "frontier": acquisition,
+            "frontier_scope": frontier_scope,
+            "champion_family": champion_family,
+            "champion_path": champion_path,
+            "champion_tree_sha256": champion_hash,
+            "opponents": opponents,
+            "epochs": epochs,
+            "campaign_root": str(campaign_root),
+        })
         if bool(request.get("qualify_submission", True)):
-            qualification = qualify_campaign(
-                campaign_root=campaign_root,
-                config_path=config_path,
-                champion_path=champion_path,
-                output_root=root / "submission",
-                frontier_scope=frontier_scope,
+            result["submission_qualification"] = qualify_campaign(
+                campaign_root=campaign_root, config_path=config_path, champion_path=champion_path,
+                output_root=root / "submission", frontier_scope=frontier_scope,
                 max_confirmation_candidates=int(request.get("max_confirmation_candidates", 3)),
             )
-            result["submission_qualification"] = qualification
     else:
         raise ValueError(f"unknown live request mode {mode!r}")
 
-    result_path = root / "LIVE_REQUEST_RESULT.json"
-    result_path.write_text(json.dumps(result, indent=2, sort_keys=True), encoding="utf-8")
+    (root / "LIVE_REQUEST_RESULT.json").write_text(json.dumps(result, indent=2, sort_keys=True), encoding="utf-8")
     return result
 
 
@@ -191,5 +155,4 @@ def main() -> None:
     print(json.dumps(result, indent=2, sort_keys=True))
 
 
-if __name__ == "__main__":
-    main()
+if __name__ == "__main__": main()

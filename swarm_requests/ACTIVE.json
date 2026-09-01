@@ -1,8 +1,14 @@
 {
   "enabled": true,
-  "request_id": "frontier-crossplay-probe-002",
-  "mode": "frontier_probe",
+  "request_id": "frontier-campaign-003",
+  "mode": "campaign",
   "config": "swarm/config/nvidia_campaign.yaml",
-  "frontier_keys": ["v32", "strict", "barnyard", "weedslip", "moon", "soil"],
-  "provider_attempts": 1
+  "epochs": 2,
+  "auto_frontier": true,
+  "frontier_keys": ["strict", "barnyard", "weedslip", "moon", "soil"],
+  "max_tokens": 22000,
+  "provider_attempts": 2,
+  "temperature": 0.35,
+  "qualify_submission": true,
+  "max_confirmation_candidates": 3
 }

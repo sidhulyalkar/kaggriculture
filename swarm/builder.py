@@ -9,7 +9,9 @@ from uuid import uuid4
 from .models import CandidateRecord, ExperimentClaim
 
 
-MAIN_PY_RE = re.compile(r"(?is)^\s*#+\s*MAIN_PY\s*$.*?```python\s*(.*?)```")
+MAIN_PY_RE = re.compile(
+    r"(?is)#+\s*MAIN_PY[^\n]*\n\s*```(?:python|py)?\s*\n?(.*?)```"
+)
 
 
 def extract_main_py(response: str) -> str:

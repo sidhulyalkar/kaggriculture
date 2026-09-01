@@ -112,6 +112,26 @@ def _run_paths(subject_path: str, opponent_path: str | None, seed: int, seat: in
     }
 
 
+def smoke_candidate(candidate_path: str, *, seed: int = 73) -> dict[str, Any]:
+    """Cheap executable gate before a generated policy can enter a tournament.
+
+    A candidate must complete one full episode against a passive policy from
+    both seats. This catches missing imports, invalid action shapes, hangs and
+    gross runtime failures before the much larger screen matrix is scheduled.
+    """
+    rows = [_run_paths(candidate_path, None, seed, seat) for seat in (0, 1)]
+    ok = all(bool(row.get("ok")) for row in rows)
+    return {
+        "ok": ok,
+        "seed": int(seed),
+        "rows": rows,
+        "invalid_games": sum(1 for row in rows if not row.get("ok")),
+        "mean_call_ms": statistics.mean(float(row.get("mean_ms", 0.0)) for row in rows if row.get("ok"))
+        if any(row.get("ok") for row in rows)
+        else float("inf"),
+    }
+
+
 def _family_rows(
     subject_path: str,
     opponents: dict[str, str | None],

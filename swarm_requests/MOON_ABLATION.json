@@ -1,0 +1,8 @@
+{
+  "enabled": true,
+  "request_id": "moon-cash-ablation-001",
+  "parent": "moon",
+  "frontier_keys": ["strict", "barnyard", "weedslip", "moon", "soil"],
+  "terminal_metric": "bank_cash",
+  "both_seats": true
+}

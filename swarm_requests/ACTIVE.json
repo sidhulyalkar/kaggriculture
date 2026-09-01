@@ -1,6 +1,6 @@
 {
   "enabled": true,
-  "request_id": "epoch0-nvidia-scout-local-control-001",
+  "request_id": "epoch0-nvidia-scout-local-control-002",
   "mode": "epoch",
   "config": "swarm/config/nvidia_verified.yaml",
   "champion_path": "submission",

@@ -34,18 +34,25 @@ def _with_metadata(evaluation: EvaluationRecord, candidate: CandidateRecord, **e
     return replace(evaluation, metadata=metadata)
 
 
+def _shifted(values: list[int], offset: int) -> tuple[int, ...]:
+    return tuple(int(value) + int(offset) for value in values)
+
+
 def evaluate_epoch(
     *,
     epoch_root: str,
     config_path: str,
     evaluator: str,
     champion_path: str,
+    seed_offset: int = 0,
 ) -> dict[str, object]:
     epoch = Path(epoch_root)
     config = load_config(config_path)
     registry = SwarmRegistry(epoch / "registry")
     candidates = [_candidate_from_row(row) for row in registry.candidates.read()]
     thresholds = config["experiments"]["promotion"]
+    screen_seeds = _shifted(config["experiments"]["screen"]["seeds"], seed_offset)
+    heldout_seeds = _shifted(config["experiments"]["heldout"]["seeds"], seed_offset)
 
     screen_objects: list[EvaluationRecord] = []
     survivors: list[CandidateRecord] = []
@@ -55,7 +62,7 @@ def evaluate_epoch(
             candidate_path=candidate.source_path,
             champion_path=champion_path,
             stage="screen",
-            seeds=tuple(int(x) for x in config["experiments"]["screen"]["seeds"]),
+            seeds=screen_seeds,
             both_seats=bool(config["experiments"]["screen"]["both_seats"]),
         )
         evaluation = _with_metadata(evaluate_with_callable(request, evaluator), candidate)
@@ -73,7 +80,7 @@ def evaluate_epoch(
             candidate_path=candidate.source_path,
             champion_path=champion_path,
             stage="heldout",
-            seeds=tuple(int(x) for x in config["experiments"]["heldout"]["seeds"]),
+            seeds=heldout_seeds,
             both_seats=bool(config["experiments"]["heldout"]["both_seats"]),
         )
         evaluation = _with_metadata(evaluate_with_callable(request, evaluator), candidate)
@@ -94,6 +101,7 @@ def evaluate_epoch(
         "candidate_count": len(candidates),
         "screen_survivors": len(survivors),
         "promoted_count": len(promoted_ids),
+        "seed_offset": seed_offset,
         "screen": [row.to_dict() for row in screen_objects],
         "heldout": [row.to_dict() for row in heldout_objects],
         "decisions": decisions,
@@ -113,12 +121,14 @@ def main() -> None:
         help="module:function evaluator adapter",
     )
     parser.add_argument("--champion-path", required=True)
+    parser.add_argument("--seed-offset", type=int, default=0)
     args = parser.parse_args()
     summary = evaluate_epoch(
         epoch_root=args.epoch_root,
         config_path=args.config,
         evaluator=args.evaluator,
         champion_path=args.champion_path,
+        seed_offset=args.seed_offset,
     )
     print(json.dumps(summary["portfolio"], indent=2, sort_keys=True))
 

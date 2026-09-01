@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import http.client
 import json
 import os
 from pathlib import Path
+import random
+import socket
 import time
 import urllib.error
 import urllib.request
@@ -20,7 +23,18 @@ class ProviderResponse:
 
 
 class ProviderError(RuntimeError):
-    pass
+    def __init__(
+        self,
+        message: str,
+        *,
+        retryable: bool = False,
+        status_code: int | None = None,
+        retry_after_s: float | None = None,
+    ):
+        super().__init__(message)
+        self.retryable = bool(retryable)
+        self.status_code = status_code
+        self.retry_after_s = retry_after_s
 
 
 class BaseProvider:
@@ -28,6 +42,16 @@ class BaseProvider:
 
     def complete(self, *, model: str, system: str, prompt: str, timeout_s: int) -> ProviderResponse:
         raise NotImplementedError
+
+
+def _retry_after_seconds(exc: urllib.error.HTTPError) -> float | None:
+    raw = exc.headers.get("Retry-After") if exc.headers else None
+    if raw is None:
+        return None
+    try:
+        return max(0.0, float(raw))
+    except (TypeError, ValueError):
+        return None
 
 
 def _post_json(*, endpoint: str, api_key: str, body: dict[str, Any], timeout_s: int) -> dict[str, Any]:
@@ -39,19 +63,46 @@ def _post_json(*, endpoint: str, api_key: str, body: dict[str, Any], timeout_s: 
     )
     try:
         with urllib.request.urlopen(request, timeout=timeout_s) as response:
-            return json.loads(response.read().decode("utf-8"))
+            raw = response.read().decode("utf-8")
+        try:
+            return json.loads(raw)
+        except json.JSONDecodeError as exc:
+            raise ProviderError(
+                f"provider returned invalid JSON: {exc}",
+                retryable=True,
+            ) from exc
     except urllib.error.HTTPError as exc:
         detail = exc.read().decode("utf-8", errors="replace")[-2000:]
-        raise ProviderError(f"HTTP {exc.code}: {detail}") from exc
-    except (urllib.error.URLError, TimeoutError, json.JSONDecodeError) as exc:
-        raise ProviderError(f"provider request failed: {exc}") from exc
+        retryable = exc.code in {408, 425, 429, 500, 502, 503, 504}
+        raise ProviderError(
+            f"HTTP {exc.code}: {detail}",
+            retryable=retryable,
+            status_code=int(exc.code),
+            retry_after_s=_retry_after_seconds(exc),
+        ) from exc
+    except (
+        urllib.error.URLError,
+        TimeoutError,
+        socket.timeout,
+        ConnectionError,
+        http.client.HTTPException,
+        OSError,
+    ) as exc:
+        raise ProviderError(
+            f"provider transport failed: {type(exc).__name__}: {exc}",
+            retryable=True,
+        ) from exc
 
 
 def _retryable_provider_error(exc: ProviderError) -> bool:
+    if getattr(exc, "retryable", False):
+        return True
     text = str(exc).lower()
     return any(
         token in text
         for token in (
+            "http 408",
+            "http 425",
             "http 429",
             "http 500",
             "http 502",
@@ -61,22 +112,37 @@ def _retryable_provider_error(exc: ProviderError) -> bool:
             "timeout",
             "temporarily unavailable",
             "connection reset",
+            "remote end closed connection",
+            "remote disconnected",
+            "incomplete read",
         )
     )
+
+
+def _retry_delay_s(exc: ProviderError, attempt: int) -> float:
+    retry_after = getattr(exc, "retry_after_s", None)
+    if retry_after is not None:
+        base = retry_after
+    else:
+        base = float(os.environ.get("SWARM_PROVIDER_BACKOFF_BASE_S", "2.0")) * (2.0 ** attempt)
+    cap = float(os.environ.get("SWARM_PROVIDER_MAX_BACKOFF_S", "30.0"))
+    jitter = random.uniform(0.0, float(os.environ.get("SWARM_PROVIDER_BACKOFF_JITTER_S", "0.75")))
+    return min(cap, max(0.0, base)) + jitter
 
 
 def _post_json_with_retries(
     *, endpoint: str, api_key: str, body: dict[str, Any], timeout_s: int, attempts: int
 ) -> dict[str, Any]:
+    total_attempts = max(1, int(attempts))
     last_error: ProviderError | None = None
-    for attempt in range(max(1, attempts)):
+    for attempt in range(total_attempts):
         try:
             return _post_json(endpoint=endpoint, api_key=api_key, body=body, timeout_s=timeout_s)
         except ProviderError as exc:
             last_error = exc
-            if attempt + 1 >= attempts or not _retryable_provider_error(exc):
+            if attempt + 1 >= total_attempts or not _retryable_provider_error(exc):
                 raise
-            time.sleep(min(8.0, 2.0 ** attempt))
+            time.sleep(_retry_delay_s(exc, attempt))
     assert last_error is not None
     raise last_error
 
@@ -114,7 +180,13 @@ class OpenAIResponsesProvider(BaseProvider):
             "input": prompt,
             "reasoning": {"effort": os.environ.get("SWARM_OPENAI_REASONING", "high")},
         }
-        payload = _post_json(endpoint=self.endpoint, api_key=api_key, body=body, timeout_s=timeout_s)
+        payload = _post_json_with_retries(
+            endpoint=self.endpoint,
+            api_key=api_key,
+            body=body,
+            timeout_s=timeout_s,
+            attempts=int(os.environ.get("SWARM_OPENAI_ATTEMPTS", "3")),
+        )
         return ProviderResponse(
             text=self._output_text(payload),
             provider=self.name,

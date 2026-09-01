@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "kaggriculture-v2"
 version = "0.2.0"
-description = "Replay intelligence, best-response search, and deterministic Kaggriculture agents"
+description = "Replay intelligence, best-response search, deterministic Kaggriculture agents, and autonomous swarm research orchestration"
 requires-python = ">=3.11"
 dependencies = [
   "numpy>=1.26",
@@ -13,6 +13,7 @@ dependencies = [
   "scikit-learn>=1.4",
   "pyarrow>=15",
   "matplotlib>=3.8",
+  "PyYAML>=6.0",
 ]
 
 [tool.setuptools.packages.find]

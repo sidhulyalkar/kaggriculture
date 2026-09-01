@@ -1,8 +1,8 @@
 {
   "enabled": true,
-  "request_id": "epoch0-nvidia-probe-001",
+  "request_id": "epoch0-nvidia-reprobe-002",
   "mode": "probe",
   "config": "swarm/config/nvidia_live.yaml",
   "max_tokens": 64,
-  "timeout_s": 180
+  "timeout_s": 120
 }

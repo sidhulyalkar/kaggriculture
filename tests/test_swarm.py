@@ -1,10 +1,14 @@
+from pathlib import Path
+
 import pytest
 
 from swarm.builder import extract_main_py
 from swarm.config_loader import validate_config
+from swarm.kaggriculture_evaluator import smoke_candidate
 from swarm.models import EvaluationRecord
 from swarm.parser import parse_claim
 from swarm.promotion import promotion_decision
+from swarm.run_epoch import _read_agent_bundle
 from swarm.safety import check_source
 
 
@@ -58,6 +62,29 @@ def test_static_check_rejects_dynamic_or_unsafe_embedded_code():
     result = check_source(source)
     assert not result.ok
     assert any("subprocess" in error for error in result.errors)
+
+
+def test_agent_bundle_includes_dependencies(tmp_path: Path):
+    root = tmp_path / "agent"
+    root.mkdir()
+    (root / "main.py").write_text("from helper import agent\n", encoding="utf-8")
+    (root / "helper.py").write_text("def agent(obs, cfg=None): return {'farmer':['PASS'],'hands':[],'market':[]}\n", encoding="utf-8")
+    bundle = _read_agent_bundle(str(root))
+    assert "BUNDLED FILE: main.py" in bundle
+    assert "BUNDLED FILE: helper.py" in bundle
+    assert "quarantined as one main.py" in bundle
+
+
+def test_runtime_smoke_accepts_minimal_passive_agent(tmp_path: Path):
+    candidate = tmp_path / "main.py"
+    candidate.write_text(
+        "def agent(obs, configuration=None):\n    return {'farmer':['PASS'],'hands':[],'market':[]}\n",
+        encoding="utf-8",
+    )
+    smoke = smoke_candidate(str(candidate), seed=73)
+    assert smoke["ok"]
+    assert smoke["invalid_games"] == 0
+    assert len(smoke["rows"]) == 2
 
 
 def test_promotion_requires_every_gate_and_supports_lane_override():

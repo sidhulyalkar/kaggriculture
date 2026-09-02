@@ -22,7 +22,7 @@ BASE_PRICE = {
     "EGG": 50, "MILK": 160, "WOOL": 200, "FERTILIZER": 100,
 }
 MARKET_I0 = 10000
-_SHED_ACCESS = ((4, 4), (5, 4), (4, 5), (5, 5))
+_SHED_ACCESS = frozenset({(4, 4), (5, 4), (4, 5), (5, 5)})
 
 
 @dataclass(frozen=True)
@@ -84,6 +84,112 @@ def _positions(farm: Any) -> list[tuple[int, int]]:
         if isinstance(pos, (list, tuple)) and len(pos) >= 2:
             out.append((int(pos[0]), int(pos[1])))
     return out
+
+
+def _unit_positions(farm: Any) -> list[tuple[int, int] | None]:
+    """Farmer + hands in engine execution order, preserving inventory slots."""
+    out: list[tuple[int, int] | None] = []
+    farmer = _get(farm, "farmer", None)
+    if isinstance(farmer, (list, tuple)) and len(farmer) >= 2:
+        out.append((int(farmer[0]), int(farmer[1])))
+    else:
+        out.append(None)
+    for pos in list(_get(farm, "hands", []) or []):
+        if isinstance(pos, (list, tuple)) and len(pos) >= 2:
+            out.append((int(pos[0]), int(pos[1])))
+        else:
+            out.append(None)
+    return out
+
+
+def _unit_actions(action: Any, count: int) -> list[Any]:
+    if not isinstance(action, dict):
+        return [["PASS"] for _ in range(count)]
+    actions: list[Any] = [action.get("farmer", ["PASS"])]
+    hands = action.get("hands", [])
+    if isinstance(hands, list):
+        actions.extend(hands)
+    while len(actions) < count:
+        actions.append(["PASS"])
+    return actions[:count]
+
+
+def _int_inventory(raw: Any) -> dict[str, int]:
+    if not isinstance(raw, dict):
+        return {}
+    out: dict[str, int] = {}
+    for key, value in raw.items():
+        try:
+            out[str(key)] = max(0, int(value or 0))
+        except Exception:
+            continue
+    return out
+
+
+def post_physical_shed(obs: Any, action: Any) -> dict[str, int]:
+    """Reconstruct our shed immediately before the market queue executes.
+
+    The default engine applies farmer and hand actions before market orders. A
+    unit already on a shed tile can therefore DROP/PLACE/PICKUP inventory and
+    change how much of a same-turn SELL order actually executes. This helper
+    mirrors those shed mutations in farmer-then-hand order, including the
+    100-unit shed capacity. It intentionally ignores unrelated physical actions.
+    """
+    private = _get(obs, "private", {}) or {}
+    shed = _int_inventory(_get(private, "shed", {}) or {})
+    raw_inventories = list(_get(private, "inventories", []) or [])
+    inventories = [_int_inventory(inv) for inv in raw_inventories]
+
+    farms = list(_get(obs, "farms", []) or [])
+    try:
+        player = int(_get(obs, "player", 0) or 0)
+    except Exception:
+        player = 0
+    farm = farms[player] if 0 <= player < len(farms) else {}
+    positions = _unit_positions(farm)
+    while len(inventories) < len(positions):
+        inventories.append({})
+    actions = _unit_actions(action, len(positions))
+
+    def room() -> int:
+        return max(0, 100 - sum(shed.values()))
+
+    for idx, (pos, unit_action) in enumerate(zip(positions, actions)):
+        if pos not in _SHED_ACCESS or not isinstance(unit_action, (list, tuple)) or not unit_action:
+            continue
+        op = str(unit_action[0])
+        inv = inventories[idx]
+        if op == "DROP":
+            # Mirror simulator insertion order and capacity behavior. The engine
+            # clears each dropped inventory key even if the shed becomes full.
+            for item, quantity in list(inv.items()):
+                take = min(max(0, int(quantity)), room())
+                if take:
+                    shed[item] = shed.get(item, 0) + take
+                inv.pop(item, None)
+        elif op == "PLACE" and len(unit_action) >= 2:
+            item = str(unit_action[1])
+            try:
+                requested = int(unit_action[2]) if len(unit_action) >= 3 else 1
+            except Exception:
+                requested = 0
+            take = min(requested, inv.get(item, 0), room())
+            if take > 0:
+                inv[item] = inv.get(item, 0) - take
+                if inv[item] == 0:
+                    inv.pop(item, None)
+                shed[item] = shed.get(item, 0) + take
+        elif op == "PICKUP" and len(unit_action) >= 2:
+            item = str(unit_action[1])
+            try:
+                requested = int(unit_action[2]) if len(unit_action) >= 3 else 1
+            except Exception:
+                requested = 0
+            take = min(requested, shed.get(item, 0))
+            if take > 0:
+                shed[item] = shed.get(item, 0) - take
+                inv[item] = inv.get(item, 0) + take
+    return shed
 
 
 def _shed_distance(pos: tuple[int, int]) -> int:
@@ -193,13 +299,15 @@ def sale_quantity(action: Any, product: str) -> int:
     return total
 
 
-def _own_available_shed(obs: Any, product: str) -> int:
-    private = _get(obs, "private", {}) or {}
-    shed = _get(private, "shed", {}) or {}
+def executed_sell_quantity(obs: Any, action: Any, product: str) -> int:
+    """Exact own SELL execution before floor censoring for default rules."""
+    requested = sale_quantity(action, product)
+    shed = post_physical_shed(obs, action)
     try:
-        return max(0, int(_get(shed, product, 0) or 0))
+        available = max(0, int(shed.get(str(product), 0) or 0))
     except Exception:
-        return 0
+        available = 0
+    return min(requested, available)
 
 
 def infer_external_supply(prev_obs: Any, curr_obs: Any, own_previous_action: Any, product: str) -> ExternalSupplyEstimate:
@@ -207,11 +315,12 @@ def infer_external_supply(prev_obs: Any, curr_obs: Any, own_previous_action: Any
 
     For products that players cannot buy, and while price remains above the $1
     floor, this is exact: next_inventory - previous_inventory + deterministic
-    town drain - our executed shed sell. At the floor, sold units are censored by
-    the engine because they stop increasing market inventory, so only an
-    unbounded/uncertain statement is safe. WHEAT and FERTILIZER are reported as
-    unsupported because an opponent BUY_PRODUCT is observationally confounded
-    with a smaller sell.
+    town drain - our executed shed sell. The own-sell term includes same-turn
+    DROP/PLACE/PICKUP shed mutations because physical unit actions execute before
+    market orders. At the floor, sold units are censored by the engine because
+    they stop increasing market inventory, so only an unbounded/uncertain
+    statement is safe. WHEAT and FERTILIZER are unsupported because an opponent
+    BUY_PRODUCT is observationally confounded with a smaller sell.
     """
     product = str(product)
     prev_market = _get(prev_obs, "market", {}) or {}
@@ -240,8 +349,7 @@ def infer_external_supply(prev_obs: Any, curr_obs: Any, own_previous_action: Any
             note="sales at the $1 floor do not enter public market inventory",
         )
 
-    requested = sale_quantity(own_previous_action, product)
-    own_sell = min(requested, _own_available_shed(prev_obs, product))
+    own_sell = executed_sell_quantity(prev_obs, own_previous_action, product)
     external = delta + drain - own_sell
     # Negative values indicate an observation/clock mismatch or a violated default
     # environment assumption. Keep the signed diagnostic but do not invent a sale.

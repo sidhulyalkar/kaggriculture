@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 import math
 from typing import Any
 
 PRODUCTS = ("WHEAT", "CARROT", "TOMATO", "STRAWBERRY", "MELON", "EGG", "MILK", "WOOL", "FERTILIZER")
+NONBUYABLE_PRODUCTS = frozenset({"CARROT", "TOMATO", "STRAWBERRY", "MELON", "EGG", "MILK", "WOOL"})
 ANIMAL_PRODUCT = {"GOOSE": "EGG", "COW": "MILK", "SHEEP": "WOOL"}
 SHOP_PRODUCTS = {
     "BAKERY": ("EGG", "WHEAT"),
@@ -21,6 +23,20 @@ BASE_PRICE = {
 }
 MARKET_I0 = 10000
 _SHED_ACCESS = ((4, 4), (5, 4), (4, 5), (5, 5))
+
+
+@dataclass(frozen=True)
+class ExternalSupplyEstimate:
+    product: str
+    exact: bool
+    effective_units: int | None
+    lower_bound: int
+    upper_bound: int | None
+    floor_censored: bool
+    market_delta: int
+    town_drain: int
+    own_sell_units: int | None
+    note: str = ""
 
 
 def _get(obj: Any, key: str, default: Any = None) -> Any:
@@ -175,3 +191,70 @@ def sale_quantity(action: Any, product: str) -> int:
             except Exception:
                 pass
     return total
+
+
+def _own_available_shed(obs: Any, product: str) -> int:
+    private = _get(obs, "private", {}) or {}
+    shed = _get(private, "shed", {}) or {}
+    try:
+        return max(0, int(_get(shed, product, 0) or 0))
+    except Exception:
+        return 0
+
+
+def infer_external_supply(prev_obs: Any, curr_obs: Any, own_previous_action: Any, product: str) -> ExternalSupplyEstimate:
+    """Infer the opponent's market contribution from public market accounting.
+
+    For products that players cannot buy, and while price remains above the $1
+    floor, this is exact: next_inventory - previous_inventory + deterministic
+    town drain - our executed shed sell. At the floor, sold units are censored by
+    the engine because they stop increasing market inventory, so only an
+    unbounded/uncertain statement is safe. WHEAT and FERTILIZER are reported as
+    unsupported because an opponent BUY_PRODUCT is observationally confounded
+    with a smaller sell.
+    """
+    product = str(product)
+    prev_market = _get(prev_obs, "market", {}) or {}
+    curr_market = _get(curr_obs, "market", {}) or {}
+    prev_inv = int(_get(_get(prev_market, "inventory", {}) or {}, product, MARKET_I0) or MARKET_I0)
+    curr_inv = int(_get(_get(curr_market, "inventory", {}) or {}, product, MARKET_I0) or MARKET_I0)
+    prev_price = int(_get(_get(prev_market, "prices", {}) or {}, product, BASE_PRICE.get(product, 1)) or 1)
+    curr_price = int(_get(_get(curr_market, "prices", {}) or {}, product, BASE_PRICE.get(product, 1)) or 1)
+    shops = list(_get(_get(prev_obs, "town", {}) or {}, "unlocked_shops", []) or [])
+    step = canonical_step(prev_obs)
+    drain = town_drain_for_turn(step, shops, product)
+    delta = curr_inv - prev_inv
+
+    if product not in NONBUYABLE_PRODUCTS:
+        return ExternalSupplyEstimate(
+            product=product, exact=False, effective_units=None, lower_bound=0, upper_bound=None,
+            floor_censored=False, market_delta=delta, town_drain=drain, own_sell_units=None,
+            note="opponent BUY_PRODUCT is confounded with opponent selling for this product",
+        )
+
+    floor_censored = prev_price <= 1 or curr_price <= 1
+    if floor_censored:
+        return ExternalSupplyEstimate(
+            product=product, exact=False, effective_units=None, lower_bound=0, upper_bound=None,
+            floor_censored=True, market_delta=delta, town_drain=drain, own_sell_units=None,
+            note="sales at the $1 floor do not enter public market inventory",
+        )
+
+    requested = sale_quantity(own_previous_action, product)
+    own_sell = min(requested, _own_available_shed(prev_obs, product))
+    external = delta + drain - own_sell
+    # Negative values indicate an observation/clock mismatch or a violated default
+    # environment assumption. Keep the signed diagnostic but do not invent a sale.
+    exact_units = max(0, int(external))
+    return ExternalSupplyEstimate(
+        product=product,
+        exact=True,
+        effective_units=exact_units,
+        lower_bound=exact_units,
+        upper_bound=exact_units,
+        floor_censored=False,
+        market_delta=delta,
+        town_drain=drain,
+        own_sell_units=own_sell,
+        note="" if external >= 0 else f"negative residual {external}; check turn alignment/default configuration",
+    )

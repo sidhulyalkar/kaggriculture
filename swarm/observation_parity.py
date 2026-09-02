@@ -51,29 +51,43 @@ _SHIM = '''\ndef _v49_normalize_observation_step(obs):
 '''
 
 
+def _agent_observation_name(node: ast.FunctionDef | ast.AsyncFunctionDef) -> str:
+    args = list(node.args.posonlyargs) + list(node.args.args)
+    if not args:
+        raise ValueError("top-level agent has no observation argument")
+    return str(args[0].arg)
+
+
 def inject_parity_shim(source: str) -> str:
     """Inject a canonical-clock call into the real top-level ``agent`` function.
 
-    AST discovery deliberately ignores ``def agent`` text inside embedded source
-    strings, which is common in the historical Soil/H6 lineage.
+    Historical public agents use unusual indentation and occasionally multi-line
+    function signatures.  The injector therefore uses the AST for both the first
+    body statement and the observation-argument name instead of assuming four
+    spaces or inserting immediately after the textual ``def`` line.
     """
     tree = ast.parse(source)
-    agents = [node for node in tree.body if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name == "agent"]
+    agents = [
+        node
+        for node in tree.body
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name == "agent"
+    ]
     if len(agents) != 1:
         raise ValueError(f"expected exactly one top-level agent, found {len(agents)}")
     node = agents[0]
+    if not node.body:
+        raise ValueError("top-level agent has an empty body")
+
+    obs_name = _agent_observation_name(node)
+    body_line = int(node.body[0].lineno) - 1
+    body_indent = " " * int(node.body[0].col_offset)
+    call = f"{body_indent}_v49_normalize_observation_step({obs_name})\n"
+    helper_line = int(node.lineno) - 1
+
     lines = source.splitlines(keepends=True)
-    insert_at = int(node.lineno)  # 1-based def line -> insert immediately after it.
-    indent = " " * (int(node.col_offset) + 4)
-    call = f"{indent}_v49_normalize_observation_step(obs)\n"
-    # Helper goes immediately before the top-level entrypoint so all dependencies
-    # above remain untouched and every downstream controller receives normalized obs.
-    helper_at = int(node.lineno) - 1
-    lines.insert(helper_at, _SHIM + "\n")
-    # The helper insertion shifted the entrypoint by one list element, but the helper
-    # itself is a multi-line string inside one element, so the original def is now at
-    # index insert_at. Insert the call after that def element.
-    lines.insert(insert_at + 1, call)
+    # Insert from bottom to top so original AST line numbers remain valid.
+    lines.insert(body_line, call)
+    lines.insert(helper_line, _SHIM + "\n")
     out = "".join(lines)
     compile(out, "<v49-parity-source>", "exec")
     return out

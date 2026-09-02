@@ -3,7 +3,9 @@ from __future__ import annotations
 from copy import deepcopy
 
 from swarm.market_belief import (
+    executed_sell_quantity,
     infer_external_supply,
+    post_physical_shed,
     public_sale_features,
     sale_quantity,
     shop_demand_units,
@@ -13,6 +15,7 @@ from swarm.market_belief import (
 
 def _obs():
     return {
+        "player": 0,
         "day": 3,
         "hour": 0,
         "farms": [
@@ -21,7 +24,10 @@ def _obs():
         ],
         "market": {"inventory": {"WOOL": 9990, "MILK": 10000, "WHEAT": 10000}, "prices": {"WOOL": 220, "MILK": 160, "WHEAT": 25}},
         "town": {"unlocked_shops": ["YARN_STORE", "YARN_STORE", "FARMERS_MARKET"]},
-        "private": {"shed": {"WOOL": 99, "MILK": 5, "WHEAT": 10}},
+        "private": {
+            "shed": {"WOOL": 99, "MILK": 5, "WHEAT": 10},
+            "inventories": [{}],
+        },
     }
 
 
@@ -76,6 +82,63 @@ def test_external_supply_caps_our_requested_sell_by_known_shed_stock():
     estimate = infer_external_supply(prev, curr, {"market": [["SELL", "MILK", 10]]}, "MILK")
     assert estimate.exact
     assert estimate.own_sell_units == 2
+    assert estimate.effective_units == 4
+
+
+def test_drop_then_sell_uses_same_turn_inventory_before_market():
+    prev = _obs()
+    prev["private"]["shed"] = {"WOOL": 2}
+    prev["private"]["inventories"] = [{"WOOL": 5}]
+    action = {
+        "farmer": ["DROP"],
+        "hands": [],
+        "market": [["SELL", "WOOL", 7]],
+    }
+    assert post_physical_shed(prev, action)["WOOL"] == 7
+    assert executed_sell_quantity(prev, action, "WOOL") == 7
+
+
+def test_pickup_before_sell_reduces_same_turn_executable_stock():
+    prev = _obs()
+    prev["private"]["shed"] = {"MILK": 8}
+    prev["private"]["inventories"] = [{}]
+    action = {
+        "farmer": ["PICKUP", "MILK", 5],
+        "hands": [],
+        "market": [["SELL", "MILK", 8]],
+    }
+    assert post_physical_shed(prev, action)["MILK"] == 3
+    assert executed_sell_quantity(prev, action, "MILK") == 3
+
+
+def test_drop_respects_total_shed_capacity_and_engine_item_order():
+    prev = _obs()
+    prev["private"]["shed"] = {"WOOL": 96}
+    # Insertion order matters: MILK fills three slots, then only one CARROT fits.
+    prev["private"]["inventories"] = [{"MILK": 3, "CARROT": 4}]
+    action = {"farmer": ["DROP"], "hands": [], "market": []}
+    shed = post_physical_shed(prev, action)
+    assert shed["MILK"] == 3
+    assert shed["CARROT"] == 1
+    assert sum(shed.values()) == 100
+
+
+def test_external_supply_removes_same_turn_drop_then_sell():
+    prev = _obs()
+    prev["hour"] = 1  # step 73: no deterministic drain
+    prev["private"]["shed"] = {"WOOL": 2}
+    prev["private"]["inventories"] = [{"WOOL": 5}]
+    curr = deepcopy(prev)
+    own_action = {
+        "farmer": ["DROP"],
+        "hands": [],
+        "market": [["SELL", "WOOL", 7]],
+    }
+    # Own sale 7 + external sale 4.
+    curr["market"]["inventory"]["WOOL"] += 11
+    estimate = infer_external_supply(prev, curr, own_action, "WOOL")
+    assert estimate.exact
+    assert estimate.own_sell_units == 7
     assert estimate.effective_units == 4
 
 

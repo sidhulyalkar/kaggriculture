@@ -1,0 +1,79 @@
+name: Moon Counter Search
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [agent/v45-autonomous-swarm-lab]
+    paths:
+      - swarm_requests/MOON_COUNTER.json
+
+permissions:
+  contents: read
+
+concurrency:
+  group: kaggriculture-moon-counter
+  cancel-in-progress: false
+
+env:
+  PYTHONUNBUFFERED: "1"
+  PYGAME_HIDE_SUPPORT_PROMPT: hide
+
+jobs:
+  search:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install pinned game environment
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e . 'kagglehub==1.0.2' 'kaggle-environments==1.32.7'
+
+      - name: Run adversarial Moon counter search
+        run: |
+          python -m swarm.moon_counter_search --output-root /tmp/moon-counter
+
+      - name: Verify packaged probes
+        run: |
+          set -euo pipefail
+          count=0
+          for archive in /tmp/moon-counter/submissions/*.tar.gz; do
+            [ -f "$archive" ] || continue
+            python scripts/check_submission.py "$archive"
+            count=$((count + 1))
+          done
+          test "$count" -eq 2
+
+      - name: Summarize
+        if: always()
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          p=Path('/tmp/moon-counter/MOON_COUNTER_RESULT.json')
+          if not p.exists():
+              print('No result JSON produced')
+          else:
+              d=json.loads(p.read_text())
+              print('decision:', d.get('decision'))
+              print('H6:', d.get('h6_control'))
+              for row in d.get('submissions', []):
+                  print(row['slot'], row['candidate'], row['recommendation'], 'moon=', round(row['moon_screen_win_score'],3), 'overall=', round(row['overall_win_score'],3), 'worst=', round(row['worst_family_score'],3))
+          PY
+
+      - name: Upload counter evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: moon-counter-${{ github.run_id }}
+          retention-days: 30
+          if-no-files-found: warn
+          path: |
+            /tmp/moon-counter/MOON_COUNTER_RESULT.json
+            /tmp/moon-counter/submissions/*.tar.gz

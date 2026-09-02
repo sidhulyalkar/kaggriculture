@@ -1,0 +1,10 @@
+{
+  "enabled": true,
+  "request_id": "strict-v4-clock-recovery-001",
+  "parent": "strict-v4-public-3090.1",
+  "parent_main_sha256": "f48c21166eac68d1b05a401f04f94a2eb6154e65415af64893672365ff33c7b8",
+  "parent_archive_sha256": "9a158d0b251d18d042386d33fb31a4f4096005637c80953162e329d2eb7ff072",
+  "official_environment_version": "1.32.7",
+  "mutation": "recover missing obs.step from day * turnsPerDay + hour",
+  "qualify_for_submission": true
+}

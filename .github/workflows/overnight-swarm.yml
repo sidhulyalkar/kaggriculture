@@ -1,0 +1,153 @@
+name: Overnight Swarm Intelligence
+
+on:
+  workflow_dispatch:
+    inputs:
+      days:
+        description: Fresh episode days to mirror
+        required: false
+        default: "3"
+      top_per_day:
+        description: Highest-Elo episodes per day
+        required: false
+        default: "8"
+      diverse_per_day:
+        description: Extra upper-band diverse episodes per day
+        required: false
+        default: "4"
+  push:
+    branches: [agent/v45-autonomous-swarm-lab]
+    paths:
+      - swarm_requests/OVERNIGHT_RUN.json
+  schedule:
+    # 02:15 and 12:30 Pacific during PDT. Scheduled workflows run from the
+    # default branch, so these activate automatically once this work is merged.
+    - cron: "15 9 * * *"
+    - cron: "30 19 * * *"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: kaggriculture-overnight-swarm
+  cancel-in-progress: false
+
+env:
+  PYTHONUNBUFFERED: "1"
+  PYGAME_HIDE_SUPPORT_PROMPT: hide
+  PIP_DISABLE_PIP_VERSION_CHECK: "1"
+  KAGGLE_API_TOKEN: ${{ secrets.KAGGLE_API_TOKEN }}
+  NVIDIA_API_KEY: ${{ secrets.NVIDIA_API_KEY }}
+  SWARM_NVIDIA_MAX_TOKENS: "1800"
+  SWARM_NVIDIA_TEMPERATURE: "0.25"
+  SWARM_NVIDIA_ATTEMPTS: "3"
+
+jobs:
+  research:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 240
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: |
+            pyproject.toml
+            requirements.txt
+
+      - name: Restore Kaggle intelligence cache
+        uses: actions/cache@v4
+        with:
+          path: .cache/kaggriculture-meta
+          key: kaggriculture-meta-${{ runner.os }}-${{ github.run_id }}
+          restore-keys: |
+            kaggriculture-meta-${{ runner.os }}-
+
+      - name: Install research environment
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e . pytest 'kagglehub==1.0.2' 'kaggle-environments==1.32.7' 'kaggle>=2.2.4'
+
+      - name: Refresh resumable Kaggle mirror
+        run: |
+          DAYS='${{ inputs.days }}'; DAYS="${DAYS:-3}"
+          TOP='${{ inputs.top_per_day }}'; TOP="${TOP:-8}"
+          DIVERSE='${{ inputs.diverse_per_day }}'; DIVERSE="${DIVERSE:-4}"
+          python -m swarm.kaggle_intelligence \
+            --output-root .cache/kaggriculture-meta/mirror \
+            --days "$DAYS" \
+            --top-per-day "$TOP" \
+            --diverse-per-day "$DIVERSE"
+
+      - name: Build evidence-only base slate
+        run: |
+          DAYS='${{ inputs.days }}'; DAYS="${DAYS:-3}"
+          TOP='${{ inputs.top_per_day }}'; TOP="${TOP:-8}"
+          DIVERSE='${{ inputs.diverse_per_day }}'; DIVERSE="${DIVERSE:-4}"
+          python -m swarm.overnight_slate \
+            --output-root /tmp/overnight-base \
+            --mirror-root .cache/kaggriculture-meta/mirror \
+            --days "$DAYS" --top-per-day "$TOP" --diverse-per-day "$DIVERSE"
+
+      - name: Run bounded NVIDIA council
+        run: |
+          mkdir -p /tmp/overnight-council
+          python -m swarm.overnight_council \
+            --slate /tmp/overnight-base/TOMORROW_SLATE.json \
+            --output /tmp/overnight-council/COUNCIL_PROPOSALS.json
+
+      - name: Compile and test council hypotheses
+        run: |
+          DAYS='${{ inputs.days }}'; DAYS="${DAYS:-3}"
+          TOP='${{ inputs.top_per_day }}'; TOP="${TOP:-8}"
+          DIVERSE='${{ inputs.diverse_per_day }}'; DIVERSE="${DIVERSE:-4}"
+          python -m swarm.overnight_slate \
+            --output-root /tmp/overnight-final \
+            --mirror-root .cache/kaggriculture-meta/mirror \
+            --proposal-file /tmp/overnight-council/COUNCIL_PROPOSALS.json \
+            --days "$DAYS" --top-per-day "$TOP" --diverse-per-day "$DIVERSE"
+
+      - name: Verify final archives
+        run: |
+          set -euo pipefail
+          count=0
+          for archive in /tmp/overnight-final/submissions/*.tar.gz; do
+            [ -f "$archive" ] || continue
+            python scripts/check_submission.py "$archive"
+            count=$((count + 1))
+          done
+          test "$count" -ge 1
+
+      - name: Summarize final slate
+        if: always()
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          p=Path('/tmp/overnight-final/TOMORROW_SLATE.json')
+          if p.exists():
+              d=json.loads(p.read_text())
+              print('decision:', d.get('decision'))
+              for row in d.get('slate', []):
+                  print(row.get('slot'), row.get('candidate'), row.get('recommendation'), 'composite=', round(row.get('composite',0),4), 'static=', round(row.get('static_win_score',0),4), 'replay=', round(row.get('replay_win_score',0),4))
+          else:
+              print('No final slate JSON produced.')
+          PY
+
+      - name: Upload compact overnight evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: overnight-swarm-${{ github.run_id }}
+          retention-days: 30
+          if-no-files-found: warn
+          path: |
+            .cache/kaggriculture-meta/mirror/MIRROR_MANIFEST.json
+            .cache/kaggriculture-meta/mirror/public/PUBLIC_META.json
+            .cache/kaggriculture-meta/mirror/authenticated/AUTH_META.json
+            /tmp/overnight-base/TOMORROW_SLATE.json
+            /tmp/overnight-council/COUNCIL_PROPOSALS.json
+            /tmp/overnight-final/TOMORROW_SLATE.json
+            /tmp/overnight-final/submissions/*.tar.gz

@@ -1,0 +1,143 @@
+version: 1
+name: v45-nvidia-frontier-campaign
+frontier:
+  branch: agent/v44-frontier-margin-engine
+  champion_policy: CURRENT_QUALIFIED_CHAMPION
+  preserve_champion: true
+
+budget:
+  frontier_improvement: 0.42
+  counter_policy: 0.28
+  architecture: 0.10
+  mechanism: 0.12
+  weird: 0.08
+
+providers:
+  default_timeout_s: 360
+  max_parallel_requests: 4
+  model_parallel_limits:
+    moonshotai/kimi-k3: 1
+    nvidia/nemotron-3.5-lightning-30b-a3b: 3
+  models:
+    chief_scientist:
+      provider: nvidia
+      model: moonshotai/kimi-k3
+    architect:
+      provider: nvidia
+      model: moonshotai/kimi-k3
+    adversary:
+      provider: nvidia
+      model: nvidia/nemotron-3.5-lightning-30b-a3b
+    mechanism:
+      provider: nvidia
+      model: nvidia/nemotron-3.5-lightning-30b-a3b
+    residual:
+      provider: nvidia
+      model: moonshotai/kimi-k3
+    explorer:
+      provider: nvidia
+      model: nvidia/nemotron-3.5-lightning-30b-a3b
+    auditor:
+      provider: nvidia
+      model: nvidia/nemotron-3.5-lightning-30b-a3b
+
+roles:
+  - id: architect
+    count: 1
+    lane: architecture
+    packet: blank_sheet
+    independence: independent
+    build_candidate: true
+  - id: adversary
+    count: 2
+    lane: counter_policy
+    packet: champion_counter
+    independence: independent
+    build_candidate: true
+  - id: mechanism
+    count: 1
+    lane: mechanism
+    packet: trace_mechanism
+    independence: independent
+    build_candidate: true
+  - id: residual
+    count: 3
+    lane: frontier_improvement
+    packet: frontier_residual
+    independence: independent
+    build_candidate: true
+  - id: explorer
+    count: 1
+    lane: weird
+    packet: open_exploration
+    independence: independent
+    build_candidate: true
+  - id: auditor
+    count: 1
+    lane: audit
+    packet: evidence_only
+    independence: independent
+    build_candidate: false
+
+council:
+  reviewers: [chief_scientist, auditor, mechanism]
+  research_feedback_boundary: screen_only
+
+experiments:
+  screen:
+    seeds: [101, 103, 107, 109]
+    both_seats: true
+    # The leaderboard reward is the episode outcome. Cash is only a broad
+    # economic collapse guard so a narrow-margin winner is not screened out.
+    min_paired_score_delta: -0.02
+    min_paired_cash_delta: -7500.0
+    min_paired_cash_relative_delta: -0.10
+  heldout:
+    seeds: [211, 223, 227, 229, 233, 239]
+    both_seats: true
+    sealed: true
+  promotion:
+    # Promote for repeatable win-probability uplift. Cash protects against a
+    # structurally broken policy but does not need to improve for promotion.
+    min_paired_score_delta: 0.02
+    min_worst_family_delta: -0.05
+    min_paired_cash_delta: -5000.0
+    min_median_paired_cash_delta: -2500.0
+    min_paired_cash_relative_delta: -0.05
+    min_worst_family_cash_delta: -10000.0
+    min_worst_family_cash_relative_delta: -0.15
+    min_passive_cash_ratio: 0.95
+    max_invalid_games: 0
+    max_mean_call_ms: 100.0
+    max_physical_divergence: 0.02
+    lane_overrides:
+      architecture:
+        max_physical_divergence: 1.0
+        min_passive_cash_ratio: 0.85
+      counter_policy:
+        max_physical_divergence: 1.0
+        min_passive_cash_ratio: 0.85
+      weird:
+        max_physical_divergence: 1.0
+        min_passive_cash_ratio: 0.85
+      mechanism:
+        max_physical_divergence: 0.10
+
+novelty:
+  min_behavioral_distance: 0.03
+  duplicate_code_similarity: 0.97
+  max_cluster_size: 3
+
+information_release:
+  rounds:
+    - independent_discovery
+    - mechanism_hint
+    - causal_summary
+    - implementation_share
+
+submission_slots:
+  - champion
+  - counter
+  - architecture
+  - robust
+  - explorer

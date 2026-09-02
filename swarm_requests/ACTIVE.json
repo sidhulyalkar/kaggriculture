@@ -1,0 +1,22 @@
+{
+  "enabled": true,
+  "request_id": "strict-v4-cash-campaign-005",
+  "mode": "campaign",
+  "config": "swarm/config/nvidia_campaign.yaml",
+  "epochs": 2,
+  "auto_frontier": true,
+  "frontier_keys": ["strict", "barnyard", "weedslip", "moon", "soil"],
+  "preferred_public_champion": "strict",
+  "frontier_expected_archive_sha256": {
+    "strict": "9a158d0b251d18d042386d33fb31a4f4096005637c80953162e329d2eb7ff072",
+    "barnyard": "1573dd58af311c6448640fb89380b63f88b0d63a10e788d516fb928f005be968",
+    "weedslip": "4eba4ee8c18f50145c3a76814600f5e554c1a0f1d9143196e4d064d93892885b",
+    "moon": "8472ae8c8fd062e52d2072a6bdad5151f1b21c595a511b5abe6fdcedfe1e947d",
+    "soil": "4048764b12c52a0184749852e4d0d9abce93b9e1e083522eb0b27fb4472428cb"
+  },
+  "max_tokens": 22000,
+  "provider_attempts": 4,
+  "temperature": 0.30,
+  "qualify_submission": true,
+  "max_confirmation_candidates": 3
+}

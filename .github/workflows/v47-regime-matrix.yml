@@ -1,0 +1,85 @@
+name: V47 Opening Regime Matrix
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [agent/v45-autonomous-swarm-lab]
+    paths:
+      - swarm/v47_regime_matrix.py
+      - swarm_requests/V47_REGIME_MATRIX.json
+      - .github/workflows/v47-regime-matrix.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: kaggriculture-v47-regime-matrix
+  cancel-in-progress: false
+
+env:
+  PYTHONUNBUFFERED: "1"
+  PYGAME_HIDE_SUPPORT_PROMPT: hide
+  PIP_DISABLE_PIP_VERSION_CHECK: "1"
+
+jobs:
+  matrix:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 240
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: |
+            pyproject.toml
+            requirements.txt
+
+      - name: Install pinned research environment
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e . 'kagglehub==1.0.2' 'kaggle-environments==1.32.7'
+
+      - name: Map opening-regime responses
+        run: |
+          python -m swarm.v47_regime_matrix --output-root /tmp/v47-regime-matrix
+
+      - name: Verify distilled archive
+        if: always()
+        run: |
+          if [ -f /tmp/v47-regime-matrix/submissions/V47_REGIME_ROBUST.tar.gz ]; then
+            python scripts/check_submission.py /tmp/v47-regime-matrix/submissions/V47_REGIME_ROBUST.tar.gz
+          fi
+
+      - name: Summarize learned matrix
+        if: always()
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          p=Path('/tmp/v47-regime-matrix/V47_REGIME_MATRIX.json')
+          if not p.exists():
+              print('No V47 result JSON produced')
+              raise SystemExit(0)
+          d=json.loads(p.read_text())
+          print('decision:', d.get('decision'))
+          print('robust route map:', d.get('robust_route_map'))
+          u=d.get('unconditional', {})
+          print('unconditional:', u)
+          for shop,row in sorted((d.get('regimes') or {}).items()):
+              print(shop, 'control=', round(row['h6_control']['win_score'],3), 'best=', row['robust_best_route'])
+              for family,best in sorted(row.get('best_by_family',{}).items()):
+                  print(' ', family, best['route'], 'score=', round(best['score'],3), 'delta=', round(best['delta_vs_h6'],3))
+          PY
+
+      - name: Upload regime knowledge
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: v47-regime-matrix-${{ github.run_id }}
+          retention-days: 30
+          if-no-files-found: warn
+          path: |
+            /tmp/v47-regime-matrix/V47_REGIME_MATRIX.json
+            /tmp/v47-regime-matrix/submissions/*.tar.gz

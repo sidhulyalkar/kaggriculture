@@ -1,7 +1,8 @@
 {
-  "request_id": "moon-counter-001",
-  "objective": "Find two H6 variants that materially improve the public Moon family without sacrificing full-league win rate",
+  "request_id": "moon-counter-002-yarn-conditioned",
+  "objective": "Find two H6 variants that materially improve first-YARN Moon while preserving unconditional full-league win rate",
   "control": "MARKET_H6_AGGRO",
   "required_outputs": 2,
-  "notes": "First-YARN route pivot plus stronger sheep-family premium-sale front-running"
+  "screen_regime": "first_shop=YARN_STORE",
+  "notes": "Use mechanism-conditioned first-Yarn seeds for screening; promotion remains unconditional full-league"
 }

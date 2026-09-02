@@ -47,6 +47,33 @@ def _team_names(rep: dict[str, Any]) -> list[str]:
     return [str(x) for x in names]
 
 
+def future_sale_quantity(
+    steps: list[Any],
+    observation_index: int,
+    seat: int,
+    product: str,
+    *,
+    horizon: int,
+) -> int:
+    """Requested sale quantity over the next ``horizon + 1`` decisions.
+
+    Kaggle replay row ``t`` contains observation[t] but the action attached to that
+    row produced that observation.  The first decision made *from* observation[t]
+    is therefore stored on replay row t+1.  Keeping this offset explicit prevents
+    the probe from accidentally using a past action as a future label.
+    """
+    total = 0
+    for dt in range(horizon + 1):
+        action_index = observation_index + 1 + dt
+        if action_index >= len(steps):
+            break
+        future = steps[action_index]
+        if seat >= len(future):
+            continue
+        total += sale_quantity(_state_action(future[seat]), product)
+    return total
+
+
 def build_rows(episodes: list[dict[str, Any]], product: str, *, horizon: int = 3, stride: int = 2) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     for eidx, rep in enumerate(episodes):
@@ -57,7 +84,9 @@ def build_rows(episodes: list[dict[str, Any]], product: str, *, horizon: int = 3
         teams = _team_names(rep)
         for seat in (0, 1):
             team = teams[seat] if seat < len(teams) else f"seat{seat}"
-            for t in range(0, max(0, len(steps) - horizon), max(1, stride)):
+            # Require the complete future decision window t+1..t+1+horizon.
+            last_start_exclusive = max(0, len(steps) - horizon - 1)
+            for t in range(0, last_start_exclusive, max(1, stride)):
                 turn = steps[t]
                 if seat >= len(turn) or not isinstance(turn[seat], dict):
                     continue
@@ -69,12 +98,13 @@ def build_rows(episodes: list[dict[str, Any]], product: str, *, horizon: int = 3
                     features = public_sale_features(obs, seat, product)
                 except Exception:
                     continue
-                future_qty = 0
-                for dt in range(horizon + 1):
-                    future = steps[t + dt]
-                    if seat >= len(future):
-                        continue
-                    future_qty += sale_quantity(_state_action(future[seat]), product)
+                future_qty = future_sale_quantity(
+                    steps,
+                    t,
+                    seat,
+                    product,
+                    horizon=horizon,
+                )
                 rows.append({
                     "episode_id": eid,
                     "team": team,
@@ -204,7 +234,9 @@ def run(output_root: str | Path, *, days: int = 3, per_day: int = 8, horizon: in
     payload = {
         "experiment": "V50_SALE_INTENT_LEARNABILITY",
         "data_contract": "features use public farms/market/town/day/hour only; private state is excluded",
-        "prediction_target": f"opponent SELL for product within current..+{horizon} turns",
+        "replay_contract": "action stored on replay row t+1 is the decision taken from observation row t",
+        "replay_action_offset": 1,
+        "prediction_target": f"opponent SELL for product over the next {horizon + 1} decisions after the current observation",
         "days": days,
         "per_day": per_day,
         "stride": stride,

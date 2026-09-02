@@ -1,0 +1,40 @@
+name: V52 Market Flow Alignment
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - agent/v52-hard-flow-causal-probe
+    paths:
+      - "swarm/v52_market_flow_alignment.py"
+      - "tests/test_v52_market_flow_alignment.py"
+      - ".github/workflows/v52-market-flow-alignment.yml"
+
+jobs:
+  diagnose-alignment:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Install research environment
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e . pytest "kaggle-environments==1.32.7" "kagglehub==1.0.2"
+      - name: Test same-turn shed accounting
+        run: pytest -q tests/test_market_belief.py tests/test_v52_market_flow_alignment.py
+      - name: Diagnose replay transition alignment
+        run: |
+          python -m swarm.v52_market_flow_alignment \
+            --output-root tmp/v52-market-flow-alignment \
+            --days 3 \
+            --per-day 8
+      - name: Upload V52 evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: v52-market-flow-alignment-${{ github.run_id }}
+          path: tmp/v52-market-flow-alignment/V52_MARKET_FLOW_ALIGNMENT_RESULT.json
+          retention-days: 30

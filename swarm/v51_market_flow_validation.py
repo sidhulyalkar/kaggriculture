@@ -1,14 +1,13 @@
 from __future__ import annotations
 
 import argparse
-from collections import defaultdict
 import json
 from pathlib import Path
 import shutil
 import statistics
 from typing import Any
 
-from swarm.market_belief import NONBUYABLE_PRODUCTS, infer_external_supply, sale_quantity
+from swarm.market_belief import NONBUYABLE_PRODUCTS, executed_sell_quantity, infer_external_supply
 from swarm.v77_live_meta_route_search import fetch_top_episodes
 
 
@@ -25,24 +24,20 @@ def _state_action(state: Any) -> Any:
     return state.get("action") if isinstance(state, dict) else None
 
 
-def _executed_sell_upper(pre_state: Any, action_state: Any, product: str) -> int:
-    """Ground-truth non-floor execution from replay-private state, evaluator only.
+def _executed_sell_truth(pre_state: Any, action_state: Any, product: str) -> int:
+    """Replay-private executed sale for evaluator ground truth.
 
     Kaggle replay rows store the action that produced observation[t] on row t, so
-    the action taken from observation[t] is recorded on row t+1.  Execution is
-    therefore capped by the private shed in ``pre_state`` while the order itself
-    is read from ``action_state``.
+    the action taken from observation[t] is recorded on row t+1. Physical unit
+    actions on observation[t] execute before that market queue, so DROP/PLACE/
+    PICKUP mutations must be applied to the row-t private shed before capping the
+    row-(t+1) SELL request.
     """
-    action = _state_action(action_state)
-    requested = sale_quantity(action, product)
-    obs = _state_obs(pre_state)
-    private = obs.get("private", {}) if isinstance(obs, dict) else {}
-    shed = private.get("shed", {}) if isinstance(private, dict) else {}
-    try:
-        available = max(0, int(shed.get(product, 0) or 0))
-    except Exception:
-        available = 0
-    return min(requested, available)
+    return executed_sell_quantity(
+        _state_obs(pre_state),
+        _state_action(action_state),
+        product,
+    )
 
 
 def run(output_root: str | Path, *, days: int = 3, per_day: int = 8) -> dict[str, Any]:
@@ -88,7 +83,7 @@ def run(output_root: str | Path, *, days: int = 3, per_day: int = 8) -> dict[str
                             "error": repr(exc)[:300],
                         })
                         continue
-                    truth = _executed_sell_upper(turn[target], nxt[target], product)
+                    truth = _executed_sell_truth(turn[target], nxt[target], product)
                     rows.append({
                         "episode_id": eid,
                         "turn": t,
@@ -139,6 +134,7 @@ def run(output_root: str | Path, *, days: int = 3, per_day: int = 8) -> dict[str
     payload = {
         "experiment": "V51_MARKET_FLOW_VALIDATION",
         "contract": "inference uses observer public market/town plus observer's own private shed/action; target private state is ground truth only",
+        "execution_contract": "physical DROP/PLACE/PICKUP mutations execute before same-turn market SELL orders",
         "replay_contract": "action stored on replay row t+1 is the decision taken from observation row t",
         "replay_action_offset": 1,
         "episodes": len(episodes),

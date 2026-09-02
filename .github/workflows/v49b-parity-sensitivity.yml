@@ -1,0 +1,43 @@
+name: V49B Parity Sensitivity
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - agent/v49-parity-first-redesign
+    paths:
+      - "swarm/observation_parity.py"
+      - "swarm/v49b_parity_sensitivity.py"
+      - "tests/test_observation_parity.py"
+      - ".github/workflows/v49b-parity-sensitivity.yml"
+
+jobs:
+  parity-sensitivity:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Install exact competition research environment
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e . pytest "kaggle-environments==1.32.7" "kagglehub==1.0.2"
+      - name: Test robust parity injector
+        run: pytest -q tests/test_observation_parity.py
+      - name: Run behavioral and current-meta gate
+        run: |
+          python -m swarm.v49b_parity_sensitivity \
+            --output-root tmp/v49b \
+            --seeds 4901,4919,4931,4951 \
+            --days 2 \
+            --per-day 6
+      - name: Upload V49B evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: v49b-parity-${{ github.run_id }}
+          path: |
+            tmp/v49b/V49B_RESULT.json
+          retention-days: 30

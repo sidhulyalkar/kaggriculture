@@ -1,0 +1,43 @@
+name: V50 Sale Intent Learnability
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - agent/v49-parity-first-redesign
+    paths:
+      - "swarm/market_belief.py"
+      - "swarm/v50_sale_intent_probe.py"
+      - "tests/test_market_belief.py"
+      - ".github/workflows/v50-sale-intent.yml"
+
+jobs:
+  sale-intent:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Install research environment
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e . pytest "kaggle-environments==1.32.7" "kagglehub==1.0.2"
+      - name: Verify public-information feature contract
+        run: pytest -q tests/test_market_belief.py
+      - name: Measure imminent-sale learnability
+        run: |
+          python -m swarm.v50_sale_intent_probe \
+            --output-root tmp/v50-sale-intent \
+            --days 3 \
+            --per-day 8 \
+            --horizon 3 \
+            --stride 2
+      - name: Upload V50 evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: v50-sale-intent-${{ github.run_id }}
+          path: tmp/v50-sale-intent/V50_SALE_INTENT_RESULT.json
+          retention-days: 30

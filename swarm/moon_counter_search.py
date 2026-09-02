@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 import argparse
-from hashlib import sha256
 import json
 from pathlib import Path
+import random
 import shutil
 from typing import Any
 
@@ -17,8 +17,29 @@ from swarm.overnight_slate import (
 from swarm.v77_live_meta_route_search import _hash_text, recover_soil_parent
 
 
-MOON_SCREEN_SEEDS = [4103, 4127, 4153, 4177, 4201]
+# The simulator unlocks the first shop at day 3 using
+# Random((seed * 1_000_003) ^ 2).choice(sorted(SHOPS)).  Moon's special sheep
+# overlay is dormant unless that first shop is YARN_STORE, so the causal screen
+# must explicitly exercise that regime rather than dilute it with no-op seeds.
+_SHOPS = tuple(sorted((
+    "BAKERY",
+    "PIZZA_SHOP",
+    "BRUNCH_SPOT",
+    "YARN_STORE",
+    "ICE_CREAM_SHOP",
+    "PET_CAFE",
+    "SMOOTHIE_SHOP",
+    "FARMERS_MARKET",
+)))
+
+
+def _first_shop(seed: int) -> str:
+    return random.Random((int(seed) * 1_000_003) ^ 2).choice(_SHOPS)
+
+
+MOON_SCREEN_SEEDS = [4000, 4006, 4016, 4024, 4029, 4030]
 FULL_LEAGUE_SEEDS = [5101, 5113, 5147, 5171]
+assert all(_first_shop(seed) == "YARN_STORE" for seed in MOON_SCREEN_SEEDS)
 
 
 def _atomic_json(path: Path, payload: Any) -> None:
@@ -116,7 +137,8 @@ def run(output_root: str | Path) -> dict[str, Any]:
     if moon_path is None:
         raise RuntimeError("public Moon controller unavailable")
 
-    # Phase 1: a deliberately adversarial screen. Do not average Moon weakness away.
+    # Phase 1 is mechanism-conditioned: every seed activates Moon's first-YARN
+    # overlay. This asks whether the intervention works where it is supposed to.
     _, moon_summary = evaluate_static_league(
         candidate_paths,
         {"public:moon": moon_path},
@@ -152,6 +174,8 @@ def run(output_root: str | Path) -> dict[str, Any]:
     opponents["internal:h6"] = candidate_paths["H6_BASE"]
     (root / "parent.py").write_text(parent, encoding="utf-8")
 
+    # Phase 2 is deliberately unconditional. A targeted exploit is useful only if
+    # it does not destroy the general H6 chassis on ordinary shop regimes.
     _, full_summary = evaluate_static_league(survivor_paths, opponents, FULL_LEAGUE_SEEDS)
     full_by = _by_candidate(full_summary)
     h6_full = full_by["H6_BASE"]
@@ -220,6 +244,7 @@ def run(output_root: str | Path) -> dict[str, Any]:
             "into cow-heavier routes at the first public shop signal and/or front-running its "
             "observable sheep-heavy premium sales more aggressively."
         ),
+        "screen_regime": "first_shop=YARN_STORE",
         "h6_control": {
             "moon_screen_win_score": h6_moon,
             "overall_win_score": h6_overall,
@@ -243,6 +268,7 @@ def main() -> None:
     result = run(args.output_root)
     print(json.dumps({
         "decision": result["decision"],
+        "screen_regime": result["screen_regime"],
         "h6_control": result["h6_control"],
         "submissions": [
             {

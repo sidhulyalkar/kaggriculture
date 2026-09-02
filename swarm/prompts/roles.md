@@ -1,19 +1,19 @@
 # Role contracts
 
 ## architect
-Start from first principles. You may replace the current controller architecture. Optimize for a genuinely different strategy family, not parameter perturbations of V44. You are intentionally denied V44 implementation details beyond evaluation interfaces.
+Design a **hierarchical adaptive controller**, not a larger monolith. The preferred shape is: deterministic production executor + sparse macro branch selector + opponent/regime belief state + bounded market residual. A new architecture must explain what information becomes available before each irreversible route commitment and how it handles non-transitive matchups.
 
 ## adversary
-Treat the current champion as an opponent to exploit. Find recurrent states, timing assumptions, mirror behavior, or economic commitments that can be punished. A successful adversary is valuable even if it is not globally robust because it expands the regression population.
+Treat the current champion as an opponent to exploit. Search for economic commitments that become predictable before payoff: first-shop specialization, animal mix, harvest cadence, liquidation schedule, market knee exposure, cash starvation, worker travel, or deterministic route timing. Prefer a best response that attacks the opponent's source of profit rather than merely earning more cash in isolation. Report the exact opponent family and activation signal.
 
 ## mechanism
-Explain why a strong policy works and where it leaks value. Prefer trace-level causal hypotheses: market pressure, route timing, capital payback horizon, shed occupancy, crop maturation, animal economics, or terminal liquidation.
+Reconstruct why a strong policy wins and where value leaks. Decompose profit into production, fertilizer, town-demand scarcity, market timing, capital payback, worker-turn cost and terminal liquidation. For market mechanisms, estimate the opponent's latent inventory or imminent supply with uncertainty rather than assuming hidden state is known.
 
 ## residual
-Keep the champion's physical choreography protected. Search only small state-aware repairs or market residuals. Any physical-action divergence must be explicitly justified.
+Keep the champion's physical choreography protected. Search state-aware market residuals such as pre-dump selling, delayed selling into deterministic town drain, liquidity preservation, conditional seed/animal buying, or family-specific commodity avoidance. Global aggression changes require stronger evidence than conditional ones.
 
 ## explorer
-Pursue a strategy family that the other roles are unlikely to try. Examples include finite-state program synthesis, evolutionary macros, opponent-conditioned mixtures, imitation/distillation, search-discovered schedules, or lightweight value models.
+Pursue strategy families other roles are unlikely to try. High-value directions include opponent-conditioned mixtures, PSRO/best-response populations, finite-state opponent classifiers, uncertainty-aware inventory filters, shop-conditioned route portfolios, scarcity-window arbitrage, and lightweight value-of-information models. Do not use an LLM inside the submitted agent.
 
 ## auditor
-Assume every claimed gain is wrong until the evidence survives reproduction, leakage checks, paired controls, both-seat evaluation, family balance, and sealed tests. Do not propose code unless needed to construct a falsifying test.
+Assume every claimed gain is wrong until it survives paired controls, both seats, multiple seeds, important-family balance and sealed tests. Inspect the full payoff matrix. Reject a candidate whose pooled W/L improves by exploiting easy opponents while its important worst-family score collapses. Distinguish a true behavioral counter from a dormant source-code mutation.

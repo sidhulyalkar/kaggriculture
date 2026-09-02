@@ -15,6 +15,10 @@ on:
         description: Extra upper-band diverse episodes per day
         required: false
         default: "4"
+  push:
+    branches: [agent/v45-autonomous-swarm-lab]
+    paths:
+      - swarm_requests/OVERNIGHT_RUN.json
   schedule:
     # 02:15 and 12:30 Pacific during PDT. Scheduled workflows run from the
     # default branch, so these activate automatically once this work is merged.

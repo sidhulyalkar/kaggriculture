@@ -25,11 +25,17 @@ def _state_action(state: Any) -> Any:
     return state.get("action") if isinstance(state, dict) else None
 
 
-def _executed_sell_upper(state: Any, product: str) -> int:
-    """Ground-truth non-floor execution from replay-private state, evaluator only."""
-    action = _state_action(state)
+def _executed_sell_upper(pre_state: Any, action_state: Any, product: str) -> int:
+    """Ground-truth non-floor execution from replay-private state, evaluator only.
+
+    Kaggle replay rows store the action that produced observation[t] on row t, so
+    the action taken from observation[t] is recorded on row t+1.  Execution is
+    therefore capped by the private shed in ``pre_state`` while the order itself
+    is read from ``action_state``.
+    """
+    action = _state_action(action_state)
     requested = sale_quantity(action, product)
-    obs = _state_obs(state)
+    obs = _state_obs(pre_state)
     private = obs.get("private", {}) if isinstance(obs, dict) else {}
     shed = private.get("shed", {}) if isinstance(private, dict) else {}
     try:
@@ -58,18 +64,31 @@ def run(output_root: str | Path, *, days: int = 3, per_day: int = 8) -> dict[str
                 continue
             for observer in (0, 1):
                 target = 1 - observer
-                if not isinstance(turn[observer], dict) or not isinstance(turn[target], dict) or not isinstance(nxt[observer], dict):
+                if (
+                    not isinstance(turn[observer], dict)
+                    or not isinstance(turn[target], dict)
+                    or not isinstance(nxt[observer], dict)
+                    or not isinstance(nxt[target], dict)
+                ):
                     continue
                 prev_obs = _state_obs(turn[observer])
                 curr_obs = _state_obs(nxt[observer])
-                own_action = _state_action(turn[observer])
+                # Replay contract: action[t+1] is the action taken from obs[t].
+                own_action = _state_action(nxt[observer])
                 for product in sorted(NONBUYABLE_PRODUCTS):
                     try:
                         estimate = infer_external_supply(prev_obs, curr_obs, own_action, product)
                     except Exception as exc:
-                        rows.append({"episode_id": eid, "turn": t, "observer": observer, "product": product, "status": "error", "error": repr(exc)[:300]})
+                        rows.append({
+                            "episode_id": eid,
+                            "turn": t,
+                            "observer": observer,
+                            "product": product,
+                            "status": "error",
+                            "error": repr(exc)[:300],
+                        })
                         continue
-                    truth = _executed_sell_upper(turn[target], product)
+                    truth = _executed_sell_upper(turn[target], nxt[target], product)
                     rows.append({
                         "episode_id": eid,
                         "turn": t,
@@ -111,10 +130,17 @@ def run(output_root: str | Path, *, days: int = 3, per_day: int = 8) -> dict[str
     sale_matches = [int(r.get("estimated") or 0) == int(r.get("truth") or 0) for r in sale_exact]
     exact_match_rate = statistics.mean(all_matches) if all_matches else -1.0
     sale_match_rate = statistics.mean(sale_matches) if sale_matches else -1.0
-    accounting_valid = bool(len(exact_all) >= 500 and exact_match_rate >= 0.98 and len(sale_exact) >= 30 and sale_match_rate >= 0.95)
+    accounting_valid = bool(
+        len(exact_all) >= 500
+        and exact_match_rate >= 0.98
+        and len(sale_exact) >= 30
+        and sale_match_rate >= 0.95
+    )
     payload = {
         "experiment": "V51_MARKET_FLOW_VALIDATION",
         "contract": "inference uses observer public market/town plus observer's own private shed/action; target private state is ground truth only",
+        "replay_contract": "action stored on replay row t+1 is the decision taken from observation row t",
+        "replay_action_offset": 1,
         "episodes": len(episodes),
         "acquisition": acquisition,
         "overall": {

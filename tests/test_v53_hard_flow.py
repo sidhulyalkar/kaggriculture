@@ -1,5 +1,6 @@
 from submission.hard_flow_agent import HardFlowMind
 from submission.market_flow_runtime import infer_external_supply
+from submission.predictive_agent import normalize_observation_step
 
 
 def _obs(step=5, milk_inv=10000, milk_price=160, milk_shed=0):
@@ -34,6 +35,18 @@ def test_runtime_flow_fails_closed_at_price_floor():
     assert infer_external_supply(prev, curr, {}, "MILK") is None
 
 
+def test_seat_invariant_clock_ignores_missing_or_bad_raw_step():
+    obs = _obs(step=5)
+    obs["day"] = 4
+    obs["hour"] = 7
+    obs.pop("step")
+    assert normalize_observation_step(obs) == 103
+    assert obs["step"] == 103
+    obs["step"] = 9999
+    assert normalize_observation_step(obs) == 103
+    assert obs["step"] == 103
+
+
 def test_hard_flow_accelerates_only_bounded_inventory():
     mind = HardFlowMind()
     mind._confirmed_flow["MILK"] = 8
@@ -42,6 +55,9 @@ def test_hard_flow_accelerates_only_bounded_inventory():
     orders = mind._sell_orders(obs, counts)
     milk = [o for o in orders if o[0] == "SELL" and o[1] == "MILK"]
     assert milk == [["SELL", "MILK", 8]]
+    assert mind.intervention_count == 1
+    assert mind.intervention_units == 8
+    assert mind.intervention_by_product["MILK"] == 8
 
 
 def test_small_flow_does_not_change_baseline_hold():
@@ -50,3 +66,4 @@ def test_small_flow_does_not_change_baseline_hold():
     obs = _obs(step=300, milk_inv=10040, milk_price=76, milk_shed=12)
     counts = {"COW": 8, "SHEEP": 6, "GOOSE": 0}
     assert not [o for o in mind._sell_orders(obs, counts) if o[0] == "SELL" and o[1] == "MILK"]
+    assert mind.intervention_count == 0

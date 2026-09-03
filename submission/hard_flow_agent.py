@@ -3,15 +3,15 @@ from __future__ import annotations
 import copy
 
 try:
-    from .predictive_agent import PredictiveMind
+    from .predictive_agent import PredictiveMind, normalize_observation_step
     from .base_controller import BASE, model_price
     from .market_flow_runtime import NONBUYABLE_PRODUCTS, infer_external_supply
 except Exception:
-    from predictive_agent import PredictiveMind
+    from predictive_agent import PredictiveMind, normalize_observation_step
     from base_controller import BASE, model_price
     from market_flow_runtime import NONBUYABLE_PRODUCTS, infer_external_supply
 
-# Keep V53 deliberately narrow.  These products have meaningful downside from
+# Keep V53 deliberately narrow. These products have meaningful downside from
 # another supply wave and are not observationally confounded by BUY_PRODUCT.
 FLOW_PRODUCTS = ("STRAWBERRY", "MELON", "MILK", "WOOL")
 FLOW_MIN_UNITS = 4
@@ -28,9 +28,9 @@ def _sale_revenue(product, inventory, quantity):
 class HardFlowMind(PredictiveMind):
     """V53: react only to confirmed opponent supply already visible in public state.
 
-    The base route is untouched.  When a fresh, exactly identifiable opponent
+    The base route is untouched. When a fresh, exactly identifiable opponent
     supply shock makes continued holding economically fragile, V53 may accelerate
-    a bounded portion of inventory that the baseline would otherwise hold.  The
+    a bounded portion of inventory that the baseline would otherwise hold. The
     intervention is capped by the observed shock size and never touches WHEAT,
     feed reserves, crop targets, animals, land, labor, or movement.
     """
@@ -40,6 +40,9 @@ class HardFlowMind(PredictiveMind):
         self._previous_obs = None
         self._previous_action = None
         self._confirmed_flow = {p: 0 for p in NONBUYABLE_PRODUCTS}
+        self.intervention_count = 0
+        self.intervention_units = 0
+        self.intervention_by_product = {p: 0 for p in FLOW_PRODUCTS}
 
     def _observe_confirmed_flow(self, obs):
         self._confirmed_flow = {p: 0 for p in NONBUYABLE_PRODUCTS}
@@ -76,7 +79,7 @@ class HardFlowMind(PredictiveMind):
             if price < FLOW_MIN_PRICE_RATIO * BASE[product]:
                 continue
 
-            # We do not assume the opponent repeats the entire shock.  Stress is
+            # We do not assume the opponent repeats the entire shock. Stress is
             # bounded to the smaller of the confirmed shock and a conservative cap.
             stress = min(FLOW_STRESS_CAP, shock)
             sell_now = min(quantity, shock)
@@ -87,6 +90,9 @@ class HardFlowMind(PredictiveMind):
             if loss < FLOW_MIN_LOSS_ABS or loss < FLOW_MIN_LOSS_FRAC * max(1, now):
                 continue
             orders.append(["SELL", product, sell_now])
+            self.intervention_count += 1
+            self.intervention_units += sell_now
+            self.intervention_by_product[product] += sell_now
 
         return orders[:10]
 
@@ -103,7 +109,7 @@ _POLICY = None
 
 def agent(obs, configuration=None):
     global _POLICY
-    step = int((obs or {}).get("step", 0) or 0)
+    step = normalize_observation_step(obs)
     if _POLICY is None or step == 0:
         _POLICY = HardFlowMind()
     return _POLICY.act(obs)

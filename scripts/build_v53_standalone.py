@@ -104,6 +104,16 @@ class HardFlowMind(ParametricMind):
 
 _POLICY = None
 
+# base_controller.py historically exports its own ``agent``.  Python dicts retain
+# a key's original insertion position when a later ``def agent`` overwrites it,
+# while Kaggle selects the last callable inserted into the execution globals.
+# Delete the inherited export before defining V53's final entry point so the new
+# ``agent`` is unambiguously the last callable in loader order.
+try:
+    del agent
+except NameError:
+    pass
+
 
 def agent(obs, configuration=None):
     global _POLICY

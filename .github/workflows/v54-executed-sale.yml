@@ -1,0 +1,51 @@
+name: V54 Executed Sale Learnability
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - agent/v54-executed-sale-predictor
+    paths:
+      - "swarm/market_belief.py"
+      - "swarm/v50_sale_intent_probe.py"
+      - "swarm/v54_executed_sale_predictor.py"
+      - "swarm/v77_live_meta_route_search.py"
+      - "tests/test_market_belief.py"
+      - "tests/test_replay_action_alignment.py"
+      - "tests/test_v54_executed_sale_predictor.py"
+      - ".github/workflows/v54-executed-sale.yml"
+
+jobs:
+  executed-sale:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Install research environment
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e . pytest "kaggle-environments==1.32.7" "kagglehub==1.0.2"
+      - name: Lock execution, floor and replay contracts
+        run: |
+          pytest -q \
+            tests/test_market_belief.py \
+            tests/test_replay_action_alignment.py \
+            tests/test_v54_executed_sale_predictor.py
+      - name: Measure executed-sale learnability
+        run: |
+          python -m swarm.v54_executed_sale_predictor \
+            --output-root tmp/v54-executed-sale \
+            --days 3 \
+            --per-day 8 \
+            --horizon 3 \
+            --stride 2
+      - name: Upload V54 evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: v54-executed-sale-${{ github.run_id }}
+          path: tmp/v54-executed-sale/V54_EXECUTED_SALE_RESULT.json
+          retention-days: 30

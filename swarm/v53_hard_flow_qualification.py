@@ -71,6 +71,7 @@ def _run_game(candidate_cls, opponent_cls, seed: int, candidate_seat: int, candi
                 "intervention_count": int(candidate.intervention_count),
                 "intervention_units": int(candidate.intervention_units),
                 "intervention_by_product": dict(candidate.intervention_by_product),
+                "activation": candidate.activation_snapshot(),
             })
         return row
     except BaseException as exc:
@@ -82,6 +83,41 @@ def _run_game(candidate_cls, opponent_cls, seed: int, candidate_seat: int, candi
             "ok": False,
             "error": f"{type(exc).__name__}: {exc}"[:500],
         }
+
+
+def _aggregate_activation(rows: list[dict[str, Any]]) -> dict[str, Any]:
+    v53_rows = [r for r in rows if r.get("ok") and r.get("candidate") == "V53" and isinstance(r.get("activation"), dict)]
+    funnel: dict[str, int] = defaultdict(int)
+    by_product: dict[str, dict[str, int]] = defaultdict(lambda: defaultdict(int))
+    histograms: dict[str, dict[str, int]] = defaultdict(lambda: defaultdict(int))
+    extrema: dict[str, float] = defaultdict(float)
+
+    for row in v53_rows:
+        activation = row["activation"]
+        for key, value in (activation.get("funnel") or {}).items():
+            funnel[str(key)] += int(value or 0)
+        for product, values in (activation.get("by_product") or {}).items():
+            for key, value in (values or {}).items():
+                by_product[str(product)][str(key)] += int(value or 0)
+        for name, values in (activation.get("histograms") or {}).items():
+            for key, value in (values or {}).items():
+                histograms[str(name)][str(key)] += int(value or 0)
+        for key, value in (activation.get("extrema") or {}).items():
+            extrema[str(key)] = max(float(extrema[str(key)]), float(value or 0))
+
+    return {
+        "games": len(v53_rows),
+        "funnel": dict(sorted(funnel.items())),
+        "by_product": {
+            product: dict(sorted(values.items()))
+            for product, values in sorted(by_product.items())
+        },
+        "histograms": {
+            name: dict(values)
+            for name, values in sorted(histograms.items())
+        },
+        "extrema": dict(sorted(extrema.items())),
+    }
 
 
 def _summary(rows: list[dict[str, Any]]) -> dict[str, Any]:
@@ -158,6 +194,7 @@ def _summary(rows: list[dict[str, Any]]) -> dict[str, Any]:
             "interventions": interventions,
             "intervention_units": intervention_units,
         },
+        "activation": _aggregate_activation(valid),
         "decision": "ADVANCE_TO_HOSTED_OR_LARGER_GATE" if preliminary_pass else "DO_NOT_PROMOTE_YET",
     }
 
@@ -176,7 +213,7 @@ def run(output: str | Path, seeds: list[int]) -> dict[str, Any]:
                 for seat in (0, 1):
                     rows.append(_run_game(candidate_cls, opponent_cls, seed, seat, candidate_name, opponent_name))
     payload = {
-        "experiment": "V53_HARD_FLOW_EXACT_ENGINE",
+        "experiment": "V53B_ACTIVATION_FUNNEL_EXACT_ENGINE",
         "environment": "kaggle_environments kaggriculture",
         "seeds": list(seeds),
         "summary": _summary(rows),
@@ -189,8 +226,8 @@ def run(output: str | Path, seeds: list[int]) -> dict[str, Any]:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Exact-engine paired qualification for V53 hard-flow response")
-    parser.add_argument("--output", default="tmp/v53/V53_QUALIFICATION.json")
+    parser = argparse.ArgumentParser(description="Exact-engine activation funnel for V53 hard-flow response")
+    parser.add_argument("--output", default="tmp/v53b/V53B_ACTIVATION.json")
     parser.add_argument("--seeds", default="5301,5311,5323,5333")
     args = parser.parse_args()
     seeds = [int(x.strip()) for x in args.seeds.split(",") if x.strip()]

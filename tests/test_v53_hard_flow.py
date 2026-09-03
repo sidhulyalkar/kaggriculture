@@ -58,12 +58,19 @@ def test_hard_flow_accelerates_only_bounded_inventory():
     assert mind.intervention_count == 1
     assert mind.intervention_units == 8
     assert mind.intervention_by_product["MILK"] == 8
+    assert mind.activation_funnel["positive_flow_events"] == 1
+    assert mind.activation_funnel["eligible"] == 1
+    assert mind.activation_funnel["blocked_shock"] == 0
 
 
-def test_small_flow_does_not_change_baseline_hold():
+def test_small_flow_does_not_change_baseline_hold_and_records_blocker():
     mind = HardFlowMind()
     mind._confirmed_flow["MILK"] = 3
     obs = _obs(step=300, milk_inv=10040, milk_price=76, milk_shed=12)
     counts = {"COW": 8, "SHEEP": 6, "GOOSE": 0}
     assert not [o for o in mind._sell_orders(obs, counts) if o[0] == "SELL" and o[1] == "MILK"]
     assert mind.intervention_count == 0
+    assert mind.activation_funnel["positive_flow_events"] == 1
+    assert mind.activation_funnel["positive_flow_units"] == 3
+    assert mind.activation_funnel["blocked_shock"] == 1
+    assert mind.activation_histograms["shock"]["3"] == 1

@@ -11,6 +11,21 @@ except Exception:
 
 MODEL_PATH=os.path.join(os.path.dirname(__file__),"learned_model.json")
 
+
+def normalize_observation_step(obs):
+    """Use the seat-invariant day/hour clock and expose it as ``step``.
+
+    Kaggriculture 1.32.7 does not reliably populate observation.step for every
+    seat.  day/hour are synchronized, so all stateful submission logic must use
+    this canonical clock rather than trusting the raw step field.
+    """
+    if not isinstance(obs,dict):
+        return 0
+    step=int(obs.get("day",0) or 0)*24+int(obs.get("hour",0) or 0)
+    obs["step"]=step
+    return step
+
+
 class PredictiveMind(ParametricMind):
     """Selective predictive V2 with experiment-safe feature gates.
 
@@ -97,9 +112,9 @@ class PredictiveMind(ParametricMind):
 
 _POLICY=None
 def agent(obs,configuration=None):
-    """Kaggle entry point with an explicit per-episode state reset."""
+    """Kaggle entry point with a seat-invariant per-episode state reset."""
     global _POLICY
-    step=int((obs or {}).get("step",0) or 0)
+    step=normalize_observation_step(obs)
     if _POLICY is None or step==0:
         _POLICY=PredictiveMind()
     return _POLICY.act(obs)

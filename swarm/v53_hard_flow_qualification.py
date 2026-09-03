@@ -21,6 +21,11 @@ def _agent_for(mind):
     return agent
 
 
+def _mean(values, default=-1.0):
+    values = list(values)
+    return statistics.mean(values) if values else default
+
+
 def _money(last, player: int) -> float:
     for owner in (0, 1):
         try:
@@ -91,11 +96,11 @@ def _summary(rows: list[dict[str, Any]]) -> dict[str, Any]:
             "candidate": candidate,
             "opponent": opponent,
             "games": len(group),
-            "score_rate": statistics.mean(float(r["score"]) for r in group),
-            "mean_margin": statistics.mean(float(r["margin"]) for r in group),
-            "median_margin": statistics.median(float(r["margin"]) for r in group),
-            "seat0_score": statistics.mean(float(r["score"]) for r in group if int(r["seat"]) == 0),
-            "seat1_score": statistics.mean(float(r["score"]) for r in group if int(r["seat"]) == 1),
+            "score_rate": _mean(float(r["score"]) for r in group),
+            "mean_margin": _mean(float(r["margin"]) for r in group),
+            "median_margin": statistics.median(float(r["margin"]) for r in group) if group else -1.0,
+            "seat0_score": _mean(float(r["score"]) for r in group if int(r["seat"]) == 0),
+            "seat1_score": _mean(float(r["score"]) for r in group if int(r["seat"]) == 1),
         })
 
     paired = []
@@ -110,8 +115,8 @@ def _summary(rows: list[dict[str, Any]]) -> dict[str, Any]:
         paired.append({
             "opponent": opponent,
             "pairs": len(keys),
-            "mean_score_delta": statistics.mean(score_delta),
-            "mean_margin_delta": statistics.mean(margin_delta),
+            "mean_score_delta": _mean(score_delta),
+            "mean_margin_delta": _mean(margin_delta),
             "median_margin_delta": statistics.median(margin_delta),
         })
 
@@ -129,8 +134,8 @@ def _summary(rows: list[dict[str, Any]]) -> dict[str, Any]:
     interventions = sum(int(r.get("intervention_count", 0)) for r in v53_rows)
     intervention_units = sum(int(r.get("intervention_units", 0)) for r in v53_rows)
     worst_family = min((float(p["mean_score_delta"]) for p in paired), default=-1.0)
-    overall_score_delta = statistics.mean(all_pair_deltas) if all_pair_deltas else -1.0
-    overall_margin_delta = statistics.mean(all_margin_deltas) if all_margin_deltas else -1.0
+    overall_score_delta = _mean(all_pair_deltas)
+    overall_margin_delta = _mean(all_margin_deltas)
     all_valid = len(valid) == len(rows)
     preliminary_pass = bool(
         all_valid
@@ -142,6 +147,7 @@ def _summary(rows: list[dict[str, Any]]) -> dict[str, Any]:
     return {
         "games": len(rows),
         "valid_games": len(valid),
+        "invalid_games": len(rows) - len(valid),
         "all_valid": all_valid,
         "table": table,
         "paired": paired,

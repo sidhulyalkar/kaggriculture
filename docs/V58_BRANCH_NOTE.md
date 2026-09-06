@@ -1,0 +1,1 @@
+V58 research changes through this commit are the handoff point for `agent/v58-opponent-policy-compiler`. The V57 submission artifacts remain frozen from commit `d2c8b96965a834dadb3c5a869712c94ffb51979c`; no V57 archive is rebuilt from these research-only commits.

@@ -1,0 +1,43 @@
+name: V57 Public Frontier Selector
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - agent/v57-public-frontier-selector
+    paths:
+      - "swarm/v57_public_frontier_selector.py"
+      - ".github/workflows/v57-public-frontier.yml"
+
+jobs:
+  select-and-package:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Install exact environment
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e . "kaggle-environments==1.32.7" "kagglehub==1.0.2"
+      - name: Recover and qualify public frontier agents
+        run: |
+          python -m swarm.v57_public_frontier_selector \
+            --output tmp/v57/V57_RESULT.json \
+            --seeds 5701,5711,5723
+      - name: Validate selected archives
+        run: |
+          test -n "$(find tmp/v57 -name 'SUBMISSION_V57_1_*.tar.gz' -print -quit)"
+          test -n "$(find tmp/v57 -name 'SUBMISSION_V57_2_*.tar.gz' -print -quit)"
+          for f in tmp/v57/SUBMISSION_V57_*.tar.gz; do python scripts/check_submission.py "$f"; done
+      - name: Upload qualified pair
+        uses: actions/upload-artifact@v4
+        with:
+          name: v57-qualified-pair-${{ github.run_id }}
+          path: |
+            tmp/v57/V57_RESULT.json
+            tmp/v57/SUBMISSION_V57_*.tar.gz
+          retention-days: 30

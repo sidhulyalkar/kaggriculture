@@ -1,0 +1,49 @@
+name: V59 NVIDIA NIM Meta Council
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - agent/v59-nim-meta-sentinel
+    paths:
+      - "swarm/v59_nim_meta_council.py"
+      - ".github/workflows/v59-nim-council.yml"
+
+permissions:
+  contents: read
+
+env:
+  NVIDIA_API_KEY: ${{ secrets.NVIDIA_API_KEY }}
+  SWARM_NVIDIA_MAX_TOKENS: "2200"
+  SWARM_NVIDIA_TEMPERATURE: "0.20"
+  SWARM_NVIDIA_ATTEMPTS: "3"
+  SWARM_NVIDIA_SEED: "59"
+
+jobs:
+  council:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Install repo
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e .
+      - name: Verify NVIDIA credential is configured
+        run: |
+          test -n "$NVIDIA_API_KEY" || (echo "NVIDIA_API_KEY is not configured" && exit 2)
+      - name: Run six-role NVIDIA NIM council
+        run: |
+          python -m swarm.v59_nim_meta_council --output tmp/v59/V59_NIM_COUNCIL.json
+      - name: Upload council evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: v59-nim-council-${{ github.run_id }}
+          path: tmp/v59/V59_NIM_COUNCIL.json
+          if-no-files-found: warn
+          retention-days: 30

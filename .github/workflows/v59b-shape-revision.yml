@@ -1,0 +1,57 @@
+name: V59b Shape Revision Gate
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - agent/v59-historical-frontier
+    paths:
+      - "swarm/v59b_shape_revision_gate.py"
+      - ".github/workflows/v59b-shape-revision.yml"
+
+jobs:
+  compare:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    permissions:
+      actions: read
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Install exact environment
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e . "kaggle-environments==1.32.7" "kagglehub==1.0.2"
+      - name: Download frozen V57 evidence
+        uses: actions/download-artifact@v4
+        with:
+          name: v57-qualified-pair-34011832448
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          repository: sidhulyalkar/kaggriculture
+          run-id: 34011832448
+          path: tmp/v59b/v57
+      - name: Compare frozen V57 Shape to current public revision
+        run: |
+          python -m swarm.v59b_shape_revision_gate \
+            --old-archive tmp/v59b/v57/SUBMISSION_V57_1_SHAPE_PASTURE.tar.gz \
+            --output tmp/v59b/V59B_RESULT.json \
+            --seeds 5951,5963,5977,5987
+      - name: Validate promoted revision when present
+        run: |
+          if [ -f tmp/v59b/SUBMISSION_V59B_CURRENT_SHAPE.tar.gz ]; then
+            python scripts/check_submission.py tmp/v59b/SUBMISSION_V59B_CURRENT_SHAPE.tar.gz
+          fi
+      - name: Upload revision evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: v59b-shape-revision-${{ github.run_id }}
+          path: |
+            tmp/v59b/V59B_RESULT.json
+            tmp/v59b/SUBMISSION_V59B_CURRENT_SHAPE.tar.gz
+          if-no-files-found: warn
+          retention-days: 30

@@ -1,0 +1,41 @@
+name: V58 Opponent Policy Compiler
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - agent/v58-opponent-policy-compiler
+    paths:
+      - "swarm/v58_opponent_policy_compiler.py"
+      - "tests/test_v58_policy_compiler.py"
+      - ".github/workflows/v58-policy-compiler.yml"
+
+jobs:
+  compile-meta:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Install exact environment
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e . pytest "kaggle-environments==1.32.7" "kagglehub==1.0.2"
+      - name: Lock family and public-state contracts
+        run: pytest -q tests/test_v58_policy_compiler.py tests/test_replay_action_alignment.py
+      - name: Compile current top-meta families
+        run: |
+          python -m swarm.v58_opponent_policy_compiler \
+            --output tmp/v58/V58_POLICY_COMPILER.json \
+            --days 4 --per-day 10 --family-threshold .86
+      - name: Upload V58 evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: v58-policy-compiler-${{ github.run_id }}
+          path: tmp/v58/V58_POLICY_COMPILER.json
+          if-no-files-found: error
+          retention-days: 30

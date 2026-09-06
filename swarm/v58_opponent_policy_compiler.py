@@ -4,7 +4,6 @@ import argparse
 from collections import Counter, defaultdict
 from hashlib import sha256
 import json
-import math
 from pathlib import Path
 import shutil
 import statistics
@@ -29,7 +28,10 @@ def _get(v:Any,k:str,d=None):
 
 def _op_skeleton(order:Any)->tuple[str,str]:
     if not isinstance(order,(list,tuple)) or not order:return ("PASS","")
-    op=str(order[0]);arg=str(order[1]) if len(order)>=2 and op in {"PLANT","PICKUP","DROP","PLACE","BUY_SEED","BUY_PRODUCT","BUY_ANIMAL","SELL"} else ""
+    op=str(order[0])
+    # Preserve the semantic first argument, including MOVE direction, while
+    # intentionally discarding numeric quantities such as SELL volume.
+    arg=str(order[1]) if len(order)>=2 else ""
     return op,arg
 
 

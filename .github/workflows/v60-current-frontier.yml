@@ -1,0 +1,45 @@
+name: V60 Current Frontier Qualification
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - agent/v60-current-frontier
+    paths:
+      - "swarm/v60_current_frontier.py"
+      - ".github/workflows/v60-current-frontier.yml"
+
+jobs:
+  qualify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Install exact environment
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e . "kaggle-environments==1.32.7" "kagglehub==1.0.2"
+      - name: Qualify current multi-route frontier
+        id: qualify
+        continue-on-error: true
+        run: python -m swarm.v60_current_frontier --output tmp/v60/V60_RESULT.json --seeds 6001,6011,6023,6037,6043
+      - name: Validate candidate archive
+        if: steps.qualify.outcome == 'success'
+        run: python scripts/check_submission.py tmp/v60/SUBMISSION_V60_MULTI_ROUTE.tar.gz
+      - name: Upload evidence and candidate
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: v60-current-frontier-${{ github.run_id }}
+          path: |
+            tmp/v60/V60_RESULT.json
+            tmp/v60/SUBMISSION_V60_MULTI_ROUTE.tar.gz
+          if-no-files-found: warn
+          retention-days: 30
+      - name: Enforce promotion gate
+        if: steps.qualify.outcome != 'success'
+        run: exit 3

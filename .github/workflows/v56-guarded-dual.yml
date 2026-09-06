@@ -1,0 +1,68 @@
+name: V56 Guarded Dual Qualification
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - agent/v56-dual-submission
+    paths:
+      - "submission/guarded_market_agent.py"
+      - "swarm/v56_guarded_qualification.py"
+      - "tests/test_v56_guarded_market.py"
+      - "scripts/build_v56_submissions.py"
+      - ".github/workflows/v56-guarded-dual.yml"
+
+jobs:
+  qualify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Install exact research environment
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e . pytest "kaggle-environments==1.32.7" "kagglehub==1.0.2"
+      - name: Distill fresh current meta
+        run: |
+          python -m swarm.v55_distill \
+            --output submission/adaptive_market_model.json \
+            --report tmp/v56/V56_DISTILL.json \
+            --days 4 --per-day 10 --horizon 3 --stride 2
+      - name: Lock guard separation contracts
+        run: pytest -q tests/test_v56_guarded_market.py tests/test_v55_adaptive_market.py tests/test_market_belief.py
+      - name: Run disjoint exact-engine qualification
+        id: qualify
+        continue-on-error: true
+        run: |
+          python -m swarm.v56_guarded_qualification \
+            --output tmp/v56/V56_QUALIFICATION.json \
+            --model submission/adaptive_market_model.json \
+            --seeds 5651,5669,5683,5699,5717
+      - name: Build guarded pair
+        if: steps.qualify.outcome == 'success'
+        run: |
+          python scripts/build_v56_submissions.py
+          python scripts/check_submission.py artifacts/submission_v56_safe.tar.gz
+          python scripts/check_submission.py artifacts/submission_v56_balanced.tar.gz
+          sha256sum artifacts/submission_v56_*.tar.gz | tee tmp/v56/SUBMISSION_SHA256.txt
+      - name: Upload evidence and candidates
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: v56-guarded-${{ github.run_id }}
+          path: |
+            tmp/v56/V56_DISTILL.json
+            tmp/v56/V56_QUALIFICATION.json
+            tmp/v56/SUBMISSION_SHA256.txt
+            submission/adaptive_market_model.json
+            artifacts/submission_v56_safe.tar.gz
+            artifacts/submission_v56_balanced.tar.gz
+          if-no-files-found: warn
+          retention-days: 30
+      - name: Enforce gate
+        if: steps.qualify.outcome != 'success'
+        run: exit 3

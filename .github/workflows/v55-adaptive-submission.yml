@@ -1,0 +1,77 @@
+name: V55 Adaptive Market Submission
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - agent/v55-adaptive-market-ambush
+    paths:
+      - "submission/adaptive_main.py"
+      - "submission/adaptive_market_agent.py"
+      - "submission/market_predictor.py"
+      - "submission/market_flow_runtime.py"
+      - "swarm/v55_distill.py"
+      - "swarm/v55_qualification.py"
+      - "tests/test_v55_adaptive_market.py"
+      - "scripts/build_v55_submission.py"
+      - ".github/workflows/v55-adaptive-submission.yml"
+
+jobs:
+  qualify-and-package:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Install exact research environment
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e . pytest "kaggle-environments==1.32.7" "kagglehub==1.0.2"
+      - name: Distill fresh top-meta sale priors
+        run: |
+          python -m swarm.v55_distill \
+            --output submission/adaptive_market_model.json \
+            --report tmp/v55/V55_DISTILL.json \
+            --days 4 --per-day 10 --horizon 3 --stride 2
+      - name: Lock runtime parity and adaptation contracts
+        run: |
+          pytest -q \
+            tests/test_v55_adaptive_market.py \
+            tests/test_market_belief.py \
+            tests/test_replay_action_alignment.py \
+            tests/test_v54_executed_sale_predictor.py
+      - name: Run paired exact-engine qualification
+        id: qualify
+        continue-on-error: true
+        run: |
+          python -m swarm.v55_qualification \
+            --output tmp/v55/V55_QUALIFICATION.json \
+            --model submission/adaptive_market_model.json \
+            --seeds 5501,5519,5531,5557,5573
+      - name: Build selected V55 submission
+        if: steps.qualify.outcome == 'success'
+        run: |
+          python scripts/build_v55_submission.py
+          python scripts/check_submission.py artifacts/submission_v55_adaptive.tar.gz
+          sha256sum artifacts/submission_v55_adaptive.tar.gz | tee tmp/v55/SUBMISSION_SHA256.txt
+      - name: Upload V55 evidence and candidate
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: v55-adaptive-${{ github.run_id }}
+          path: |
+            tmp/v55/V55_DISTILL.json
+            tmp/v55/V55_QUALIFICATION.json
+            tmp/v55/SUBMISSION_SHA256.txt
+            submission/adaptive_market_model.json
+            artifacts/submission_v55_adaptive.tar.gz
+          if-no-files-found: warn
+          retention-days: 30
+      - name: Enforce promotion gate
+        if: steps.qualify.outcome != 'success'
+        run: |
+          echo "V55 did not clear its paired exact-engine promotion gate."
+          exit 3

@@ -1,0 +1,38 @@
+name: V58c Chronological Recognition
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - agent/v58-opponent-policy-compiler
+    paths:
+      - "swarm/v58c_chronological_recognition.py"
+      - ".github/workflows/v58c-chronological-recognition.yml"
+
+jobs:
+  recognize:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Install exact environment
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e . "kaggle-environments==1.32.7" "kagglehub==1.0.2"
+      - name: Test latest-day recognition from older public episodes
+        run: |
+          python -m swarm.v58c_chronological_recognition \
+            --output tmp/v58c/V58C_RESULT.json \
+            --days 4 --per-day 10
+      - name: Upload evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: v58c-chronological-${{ github.run_id }}
+          path: tmp/v58c/V58C_RESULT.json
+          if-no-files-found: error
+          retention-days: 30

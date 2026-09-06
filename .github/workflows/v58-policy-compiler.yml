@@ -28,6 +28,7 @@ jobs:
         run: pytest -q tests/test_v58_policy_compiler.py tests/test_replay_action_alignment.py
       - name: Compile current top-meta families
         run: |
+          # V58 is a research gate: recognition quality decides whether runtime routing is justified.
           python -m swarm.v58_opponent_policy_compiler \
             --output tmp/v58/V58_POLICY_COMPILER.json \
             --days 4 --per-day 10 --family-threshold .86

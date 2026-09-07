@@ -1,0 +1,87 @@
+name: V79 fast diverse frontier
+
+on:
+  push:
+    branches: [research/v79-fast-sim-search]
+    paths:
+      - '.github/workflows/v79-fast-frontier.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  fast-frontier:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install exact simulator
+        run: |
+          python -m pip install -q --upgrade pip setuptools wheel pybind11 numpy
+          python -m pip install -q 'kagsim @ git+https://github.com/destbreso/kaggriculture-cppsim@main'
+          python - <<'PY'
+          import kagsim
+          s=kagsim.Stream([])
+          assert kagsim.ENGINE_VERSION=='1.32.7'
+          assert kagsim.run_episode(s,s,11)==(3000.0,3000.0)
+          print('kagsim',kagsim.ENGINE_VERSION,'PASS')
+          PY
+      - name: Build deliberately diverse six-agent screen
+        run: |
+          git clone -q --depth 1 https://github.com/sota1111/erl-kaggriculture /tmp/erl
+          git clone -q --depth 1 https://github.com/Unica2804/kaggri_agent /tmp/unica
+          git clone -q --depth 1 https://github.com/Seyamalam/Kaggriculture /tmp/sey
+          rm -rf experiments/v79/fast_arena experiments/v79/fast_frontier
+          mkdir -p experiments/v79/fast_arena
+          cp /tmp/erl/opponents/25_27_strict_future_v27_midgame_meta_reset.py experiments/v79/fast_arena/strict_v27.py
+          cp /tmp/erl/opponents/40_40_early_floor_39_46_top_10_v48_fast_routes.py experiments/v79/fast_arena/kaito_v48_fast_routes.py
+          cp /tmp/erl/opponents/kaggriculture_structured_economic_policy.py experiments/v79/fast_arena/kaito_v58_closed_loop.py
+          cp /tmp/erl/opponents/v16_rc5_high_score_8c_4s_premium_market_lead.py experiments/v79/fast_arena/boatlee_rc5.py
+          cp /tmp/unica/main.py experiments/v79/fast_arena/unica_current.py
+          cp /tmp/sey/main.py experiments/v79/fast_arena/seyamalam_current.py
+          test "$(sha256sum experiments/v79/fast_arena/strict_v27.py | cut -d' ' -f1)" = "f48c21166eac68d1b05a401f04f94a2eb6154e65415af64893672365ff33c7b8"
+          ls -lh experiments/v79/fast_arena
+      - name: Fast discovery
+        run: |
+          python experiments/v79/cloud_field_eval.py \
+            --arena experiments/v79/fast_arena \
+            --seeds 3 --start-seed 73001 --workers 2 \
+            --modes standard,ladder_real \
+            --out experiments/v79/results/fast_discovery
+      - name: Select top four and heldout
+        run: |
+          python - <<'PY'
+          import json,shutil
+          from pathlib import Path
+          d=json.loads(Path('experiments/v79/results/fast_discovery/field_results.json').read_text())
+          chosen=d['ranking'][:4]
+          out=Path('experiments/v79/fast_frontier');out.mkdir(parents=True,exist_ok=True)
+          for n in chosen: shutil.copy2(Path('experiments/v79/fast_arena')/(n+'.py'),out/(n+'.py'))
+          Path('experiments/v79/results/fast_frontier.json').write_text(json.dumps({'chosen':chosen},indent=2))
+          print('CHOSEN',chosen)
+          PY
+          python experiments/v79/cloud_field_eval.py \
+            --arena experiments/v79/fast_frontier \
+            --seeds 10 --start-seed 273001 --workers 2 \
+            --modes standard,ladder_real \
+            --out experiments/v79/results/fast_heldout
+      - name: Report
+        if: always()
+        run: |
+          echo DISCOVERY
+          cat experiments/v79/results/fast_discovery/summary.csv || true
+          echo FRONTIER
+          cat experiments/v79/results/fast_frontier.json || true
+          echo HELDOUT
+          cat experiments/v79/results/fast_heldout/summary.csv || true
+      - name: Upload
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: v79-fast-frontier-results
+          path: experiments/v79/results
+          retention-days: 14

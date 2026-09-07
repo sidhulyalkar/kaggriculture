@@ -1,0 +1,47 @@
+name: V79 inspect v58 router
+
+on:
+  push:
+    branches: [research/v79-fast-sim-search]
+    paths: ['.github/workflows/v79-inspect-v58-router.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: '3.11'}
+      - name: Extract top-level v58 router source and constants
+        run: |
+          git clone -q --depth 1 https://github.com/sota1111/erl-kaggriculture /tmp/e
+          python - <<'PY'
+          import ast,json
+          from pathlib import Path
+          p=Path('/tmp/e/opponents/kaggriculture_structured_economic_policy.py')
+          src=p.read_text()
+          t=ast.parse(src)
+          funcs=[n for n in t.body if isinstance(n,(ast.FunctionDef,ast.AsyncFunctionDef))]
+          print('FUNCTIONS',[(n.name,n.lineno,n.end_lineno) for n in funcs[-30:]])
+          agents=[n for n in funcs if n.name in ('agent','kaggle_agent_v58')]
+          for n in agents[-4:]:
+              print(f'\n===== {n.name} lines {n.lineno}:{n.end_lineno} =====')
+              print('\n'.join(src.splitlines()[n.lineno-1:n.end_lineno]))
+          assigns=[]
+          for n in t.body:
+              if isinstance(n,(ast.Assign,ast.AnnAssign)):
+                  names=[]
+                  targets=n.targets if isinstance(n,ast.Assign) else [n.target]
+                  for x in targets:
+                      if isinstance(x,ast.Name): names.append(x.id)
+                  if any(any(k in name.upper() for k in ('ROUTE','STEP','THRESH','MINIMAX','SHOP','YARN','BAKERY','FARMER')) for name in names):
+                      seg=ast.get_source_segment(src,n)
+                      if seg and len(seg)<3000: assigns.append(seg)
+          print('\n===== RELEVANT ASSIGNS =====')
+          print('\n'.join(assigns[-100:]))
+          PY

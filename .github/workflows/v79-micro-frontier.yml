@@ -1,0 +1,67 @@
+name: V79 micro frontier gate
+
+on:
+  push:
+    branches: [research/v79-fast-sim-search]
+    paths: ['.github/workflows/v79-micro-frontier.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  micro:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: '3.11'}
+      - name: Install kagsim
+        run: |
+          pip install -q --upgrade pybind11 numpy setuptools wheel
+          pip install -q 'kagsim @ git+https://github.com/destbreso/kaggriculture-cppsim@main'
+      - name: Assemble six families
+        run: |
+          git clone -q --depth 1 https://github.com/sota1111/erl-kaggriculture /tmp/e
+          git clone -q --depth 1 https://github.com/Unica2804/kaggri_agent /tmp/u
+          git clone -q --depth 1 https://github.com/Seyamalam/Kaggriculture /tmp/s
+          rm -rf experiments/v79/micro_arena experiments/v79/micro_frontier
+          mkdir -p experiments/v79/micro_arena
+          cp /tmp/e/opponents/25_27_strict_future_v27_midgame_meta_reset.py experiments/v79/micro_arena/strict.py
+          cp /tmp/e/opponents/40_40_early_floor_39_46_top_10_v48_fast_routes.py experiments/v79/micro_arena/v48.py
+          cp /tmp/e/opponents/kaggriculture_structured_economic_policy.py experiments/v79/micro_arena/v58.py
+          cp /tmp/e/opponents/v16_rc5_high_score_8c_4s_premium_market_lead.py experiments/v79/micro_arena/rc5.py
+          cp /tmp/u/main.py experiments/v79/micro_arena/unica.py
+          cp /tmp/s/main.py experiments/v79/micro_arena/sey.py
+      - name: One-seed paired discovery
+        run: |
+          python experiments/v79/cloud_field_eval.py --arena experiments/v79/micro_arena \
+            --seeds 1 --start-seed 880001 --workers 6 --modes standard,ladder_real \
+            --out experiments/v79/results/micro_discovery
+      - name: Four-seed top-three gate
+        run: |
+          python - <<'PY'
+          import json,shutil
+          from pathlib import Path
+          d=json.loads(Path('experiments/v79/results/micro_discovery/field_results.json').read_text())
+          chosen=d['ranking'][:3]
+          o=Path('experiments/v79/micro_frontier');o.mkdir(parents=True,exist_ok=True)
+          for n in chosen: shutil.copy2(Path('experiments/v79/micro_arena')/(n+'.py'),o/(n+'.py'))
+          Path('experiments/v79/results/micro_chosen.json').write_text(json.dumps({'chosen':chosen},indent=2))
+          print('CHOSEN',chosen)
+          PY
+          python experiments/v79/cloud_field_eval.py --arena experiments/v79/micro_frontier \
+            --seeds 4 --start-seed 1880001 --workers 6 --modes standard,ladder_real \
+            --out experiments/v79/results/micro_heldout
+      - name: Report
+        if: always()
+        run: |
+          cat experiments/v79/results/micro_discovery/summary.csv || true
+          cat experiments/v79/results/micro_chosen.json || true
+          cat experiments/v79/results/micro_heldout/summary.csv || true
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: v79-micro-frontier
+          path: experiments/v79/results

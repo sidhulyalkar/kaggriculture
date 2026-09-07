@@ -1,0 +1,73 @@
+name: V80 relative-win shadow market
+
+on:
+  push:
+    branches: [research/v80-relative-win-mpc]
+    paths:
+      - 'experiments/v80/**'
+      - '.github/workflows/v80-shadow-market.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  shadow-screen:
+    runs-on: ubuntu-latest
+    timeout-minutes: 70
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: '3.11'}
+      - name: Install simulator
+        run: |
+          pip install -q --upgrade pybind11 numpy setuptools wheel
+          pip install -q 'kagsim @ git+https://github.com/destbreso/kaggriculture-cppsim@main'
+      - name: Unit and compile gates
+        run: |
+          python -m py_compile experiments/v80/*.py
+          python experiments/v80/test_shadow.py
+      - name: Build causal arena
+        run: |
+          git clone -q --depth 1 https://github.com/sota1111/erl-kaggriculture /tmp/e
+          git clone -q --depth 1 https://github.com/Unica2804/kaggri_agent /tmp/u
+          rm -rf experiments/v80/arena experiments/v80/results
+          mkdir -p experiments/v80/arena experiments/v80/results
+          cp /tmp/e/opponents/kaggriculture_structured_economic_policy.py experiments/v80/arena/base_v58.py
+          cp /tmp/e/opponents/40_40_early_floor_39_46_top_10_v48_fast_routes.py experiments/v80/arena/base_v48.py
+          cp /tmp/e/opponents/v16_rc5_high_score_8c_4s_premium_market_lead.py experiments/v80/arena/rc5.py
+          cp /tmp/u/main.py experiments/v80/arena/unica.py
+          python experiments/v80/build_shadow_agent.py experiments/v80/arena/base_v58.py experiments/v80/arena/shadow_v58.py
+          python experiments/v80/build_shadow_agent.py experiments/v80/arena/base_v48.py experiments/v80/arena/shadow_v48.py
+      - name: Exact-engine diverse field
+        run: |
+          python experiments/v79/cloud_field_eval.py \
+            --arena experiments/v80/arena --seeds 8 --start-seed 78001 \
+            --workers 4 --modes standard,ladder_real \
+            --out experiments/v80/results/field
+          cat experiments/v80/results/field/summary.csv
+      - name: Independent holdout field
+        run: |
+          python experiments/v79/cloud_field_eval.py \
+            --arena experiments/v80/arena --seeds 8 --start-seed 88001 \
+            --workers 4 --modes standard,ladder_real \
+            --out experiments/v80/results/holdout
+          cat experiments/v80/results/holdout/summary.csv
+      - name: Record provenance
+        run: |
+          python - <<'PY'
+          import hashlib, json, pathlib
+          root=pathlib.Path('experiments/v80')
+          files=['opponent_shadow.py','shadow_market_overlay.py','build_shadow_agent.py']
+          d={f:hashlib.sha256((root/f).read_bytes()).hexdigest() for f in files}
+          (root/'results'/'provenance.json').write_text(json.dumps(d,indent=2)+'\n')
+          print(json.dumps(d,indent=2))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: v80-shadow-market-screen
+          path: |
+            experiments/v80/results
+            experiments/v80/arena/shadow_v58.py
+            experiments/v80/arena/shadow_v48.py
+          retention-days: 14

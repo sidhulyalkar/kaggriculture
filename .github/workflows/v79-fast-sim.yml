@@ -1,0 +1,138 @@
+name: V79 bit-exact frontier tournament
+
+on:
+  push:
+    branches:
+      - research/v79-fast-sim-search
+    paths:
+      - 'experiments/v79/**'
+      - '.github/workflows/v79-fast-sim.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  field-tournament:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    env:
+      PYTHONUNBUFFERED: '1'
+    steps:
+      - name: Checkout research branch
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install exact 1.32.7 fast simulator
+        run: |
+          python -m pip install --upgrade pip setuptools wheel pybind11
+          python -m pip install numpy
+          python -m pip install 'kagsim @ git+https://github.com/destbreso/kaggriculture-cppsim@main'
+          python - <<'PY'
+          import kagsim
+          print('ENGINE_VERSION', kagsim.ENGINE_VERSION)
+          s = kagsim.Stream([])
+          got = kagsim.run_episode(s, s, 11)
+          print('idle seed11', got)
+          assert kagsim.ENGINE_VERSION == '1.32.7'
+          assert got == (3000.0, 3000.0)
+          PY
+
+      - name: Assemble current public opponent zoo
+        run: |
+          set -euxo pipefail
+          rm -rf /tmp/erl /tmp/unica /tmp/seyamalam experiments/v79/arena
+          git clone --depth 1 https://github.com/sota1111/erl-kaggriculture /tmp/erl
+          git clone --depth 1 https://github.com/Unica2804/kaggri_agent /tmp/unica
+          git clone --depth 1 https://github.com/Seyamalam/Kaggriculture /tmp/seyamalam
+          mkdir -p experiments/v79/arena
+
+          # Curated public field refreshed by the ERL project.
+          cp /tmp/erl/opponents/*.py experiments/v79/arena/
+
+          # Add independent adaptive/live families, not just replay descendants.
+          cp /tmp/unica/main.py experiments/v79/arena/unica_current.py
+          if [ -f /tmp/unica/lab/agents/v4_fixed.py ]; then
+            cp /tmp/unica/lab/agents/v4_fixed.py experiments/v79/arena/unica_v4_fixed.py
+          fi
+          if [ -f /tmp/unica/lab/agents/evolved_grafted.py ]; then
+            cp /tmp/unica/lab/agents/evolved_grafted.py experiments/v79/arena/unica_evolved_grafted.py
+          fi
+          cp /tmp/seyamalam/main.py experiments/v79/arena/seyamalam_current.py
+
+          # Remove explanatory notebooks exported as .py if they are not agents.
+          python - <<'PY'
+          from pathlib import Path
+          for p in Path('experiments/v79/arena').glob('*.py'):
+              txt = p.read_text(errors='ignore')
+              if 'def agent(' not in txt and 'def agent (' not in txt:
+                  print('REMOVE_NON_AGENT', p.name)
+                  p.unlink()
+          print('ARENA')
+          for p in sorted(Path('experiments/v79/arena').glob('*.py')):
+              print(p.name, p.stat().st_size)
+          PY
+
+          # The Strict V27 copy is a provenance anchor and must remain exact.
+          test "$(sha256sum experiments/v79/arena/25_27_strict_future_v27_midgame_meta_reset.py | cut -d' ' -f1)" = "f48c21166eac68d1b05a401f04f94a2eb6154e65415af64893672365ff33c7b8"
+
+      - name: Discovery field - both seats and ladder-real clock fault
+        run: |
+          python experiments/v79/cloud_field_eval.py \
+            --arena experiments/v79/arena \
+            --seeds 8 \
+            --start-seed 91001 \
+            --workers 2 \
+            --modes standard,ladder_real \
+            --out experiments/v79/results/discovery
+
+      - name: Select frontier and run held-out deep panel
+        run: |
+          python - <<'PY'
+          import json, shutil
+          from pathlib import Path
+          src = Path('experiments/v79/results/discovery/field_results.json')
+          d = json.loads(src.read_text())
+          ranking = d['ranking']
+          # Top six keeps diversity while making the deep panel affordable.
+          chosen = ranking[:6]
+          print('FRONTIER', chosen)
+          out = Path('experiments/v79/frontier')
+          out.mkdir(parents=True, exist_ok=True)
+          for name in chosen:
+              shutil.copy2(Path('experiments/v79/arena') / f'{name}.py', out / f'{name}.py')
+          (Path('experiments/v79/results')/'frontier.json').write_text(json.dumps({'chosen': chosen}, indent=2))
+          PY
+
+          python experiments/v79/cloud_field_eval.py \
+            --arena experiments/v79/frontier \
+            --seeds 24 \
+            --start-seed 190001 \
+            --workers 2 \
+            --modes standard,ladder_real \
+            --out experiments/v79/results/heldout
+
+      - name: Print held-out report
+        if: always()
+        run: |
+          echo '--- DISCOVERY ---'
+          cat experiments/v79/results/discovery/summary.csv || true
+          echo '--- HELDOUT ---'
+          cat experiments/v79/results/heldout/summary.csv || true
+          echo '--- FRONTIER ---'
+          cat experiments/v79/results/frontier.json || true
+
+      - name: Upload tournament evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: v79-fast-sim-results
+          path: |
+            experiments/v79/results
+            experiments/v79/frontier
+          if-no-files-found: warn
+          retention-days: 14

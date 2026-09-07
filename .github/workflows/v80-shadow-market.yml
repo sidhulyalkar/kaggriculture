@@ -31,6 +31,10 @@ jobs:
           python experiments/v80/test_shadow.py
       - name: Build causal arena
         run: |
+          # checkout@v4 installs a repo-scoped auth header. Remove it before
+          # cloning unrelated public repositories or GitHub treats the scoped
+          # token as credentials for those repos.
+          git config --local --unset-all http.https://github.com/.extraheader || true
           git clone -q --depth 1 https://github.com/sota1111/erl-kaggriculture /tmp/e
           git clone -q --depth 1 https://github.com/Unica2804/kaggri_agent /tmp/u
           rm -rf experiments/v80/arena experiments/v80/results
@@ -60,7 +64,7 @@ jobs:
           python - <<'PY'
           import hashlib, json, pathlib
           root=pathlib.Path('experiments/v80')
-          files=['opponent_shadow.py','shadow_market_overlay.py','build_shadow_agent.py']
+          files=['opponent_shadow.py','shadow_market_overlay.py','build_shadow_agent.py','hidden_purchase_inference.py']
           d={f:hashlib.sha256((root/f).read_bytes()).hexdigest() for f in files}
           (root/'results'/'provenance.json').write_text(json.dumps(d,indent=2)+'\n')
           print(json.dumps(d,indent=2))

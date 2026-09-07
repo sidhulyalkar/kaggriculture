@@ -1,0 +1,51 @@
+name: V79 live ladder harvest
+
+on:
+  push:
+    branches: [research/v79-fast-sim-search]
+    paths:
+      - 'experiments/v79/live_meta_harvest.py'
+      - '.github/workflows/v79-live-meta-harvest.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  harvest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: '3.11'}
+      - name: Harvest current public submission graph and top lineages
+        run: |
+          python experiments/v79/live_meta_harvest.py \
+            --budget 36 --fresh 10 --replay-top 6 --replays-per-team 2 \
+            --sleep 2.6 --out experiments/v79/results/live_meta
+      - name: Print live score snapshot
+        if: always()
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          p=Path('experiments/v79/results/live_meta/live_scores.json')
+          if p.exists():
+              d=json.loads(p.read_text())
+              for i,r in enumerate(d[:20],1):
+                  print(i, r.get('team_name'), r.get('latest_score'), r.get('submission_id'), r.get('latest_episode'))
+          q=Path('experiments/v79/results/live_meta/lineage_clusters.json')
+          if q.exists():
+              c=json.loads(q.read_text())
+              print('\nH120 CLUSTERS')
+              for x in c.get('h120',[])[:10]: print(x)
+              print('\nFULL CLUSTERS')
+              for x in c.get('full',[])[:10]: print(x)
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: v79-live-meta-harvest
+          path: experiments/v79/results/live_meta
+          retention-days: 14

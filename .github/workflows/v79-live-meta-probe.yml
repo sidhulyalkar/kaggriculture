@@ -1,0 +1,53 @@
+name: V79 live meta probe
+
+on:
+  push:
+    branches: [research/v79-fast-sim-search]
+    paths: ['.github/workflows/v79-live-meta-probe.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: '3.11'}
+      - name: Query one public submission and inspect active team table
+        run: |
+          python - <<'PY'
+          import json, requests
+          from pathlib import Path
+          URL='https://www.kaggle.com/api/i/competitions.EpisodeService/ListEpisodes'
+          seed=55260568
+          r=requests.post(URL,json={'submissionId':seed},headers={'User-Agent':'Mozilla/5.0','Content-Type':'application/json'},timeout=60)
+          print('HTTP',r.status_code,'bytes',len(r.content))
+          r.raise_for_status()
+          d=r.json()
+          teams=d.get('teams') or []
+          eps=d.get('episodes') or []
+          print('teams',len(teams),'episodes',len(eps))
+          def slim_team(t):
+              return {k:t.get(k) for k in ('id','name','teamName','publicLeaderboardSubmissionId','lastSubmissionDate') if k in t}
+          def slim_ep(e):
+              return {
+                  'id':e.get('id'),'createTime':e.get('createTime'),'state':e.get('state'),
+                  'agents':[{k:a.get(k) for k in ('teamId','submissionId','reward','updatedScore')} for a in (e.get('agents') or [])]
+              }
+          out={'seed_submission':seed,'teams':[slim_team(t) for t in teams], 'recent_episodes':[slim_ep(e) for e in eps[-20:]]}
+          Path('experiments/v79/results').mkdir(parents=True,exist_ok=True)
+          Path('experiments/v79/results/live_meta_probe.json').write_text(json.dumps(out,indent=2))
+          # Print compact useful signal into job log.
+          print('TEAM_TABLE')
+          for t in out['teams'][:100]: print(json.dumps(t,separators=(',',':')))
+          print('RECENT')
+          for e in out['recent_episodes']: print(json.dumps(e,separators=(',',':')))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: v79-live-meta-probe
+          path: experiments/v79/results/live_meta_probe.json

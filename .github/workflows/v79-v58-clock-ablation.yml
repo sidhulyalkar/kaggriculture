@@ -1,0 +1,99 @@
+name: V79 v58 clock hardening ablation
+
+on:
+  push:
+    branches: [research/v79-fast-sim-search]
+    paths:
+      - 'experiments/v79/build_wrapped_agent.py'
+      - '.github/workflows/v79-v58-clock-ablation.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  ablate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 70
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: '3.11'}
+      - name: Install exact engine
+        run: |
+          pip install -q --upgrade pybind11 numpy setuptools wheel
+          pip install -q 'kagsim @ git+https://github.com/destbreso/kaggriculture-cppsim@main'
+      - name: Build upstream and wrapped candidates
+        run: |
+          git clone -q --depth 1 https://github.com/sota1111/erl-kaggriculture /tmp/e
+          git clone -q --depth 1 https://github.com/Unica2804/kaggri_agent /tmp/u
+          rm -rf experiments/v79/clock_arena experiments/v79/clock_pair experiments/v79/clock_artifact
+          mkdir -p experiments/v79/clock_arena experiments/v79/clock_pair experiments/v79/clock_artifact
+          cp /tmp/e/opponents/kaggriculture_structured_economic_policy.py experiments/v79/clock_arena/base_v58.py
+          cp /tmp/e/opponents/40_40_early_floor_39_46_top_10_v48_fast_routes.py experiments/v79/clock_arena/v48.py
+          cp /tmp/e/opponents/v16_rc5_high_score_8c_4s_premium_market_lead.py experiments/v79/clock_arena/rc5.py
+          cp /tmp/u/main.py experiments/v79/clock_arena/unica.py
+          python experiments/v79/build_wrapped_agent.py \
+            experiments/v79/clock_arena/base_v58.py experiments/v79/clock_arena/v79_clock.py --name v58
+          cp experiments/v79/clock_arena/base_v58.py experiments/v79/clock_pair/base_v58.py
+          cp experiments/v79/clock_arena/v79_clock.py experiments/v79/clock_pair/v79_clock.py
+          cp experiments/v79/clock_arena/v79_clock.py experiments/v79/clock_artifact/main.py
+          python -m py_compile experiments/v79/clock_artifact/main.py
+      - name: Standard equivalence against fixed opponents
+        run: |
+          python - <<'PY'
+          import importlib.util, sys
+          from pathlib import Path
+          import kagsim
+
+          def load(path,name):
+              s=importlib.util.spec_from_file_location(name,path);m=importlib.util.module_from_spec(s);s.loader.exec_module(m);return m.agent
+          base=load('experiments/v79/clock_arena/base_v58.py','base_eq')
+          patch=load('experiments/v79/clock_arena/v79_clock.py','patch_eq')
+          v48=load('experiments/v79/clock_arena/v48.py','v48_eq')
+          rc5=load('experiments/v79/clock_arena/rc5.py','rc5_eq')
+
+          def run(a,b,seed,seat):
+              g=kagsim.Game(seed)
+              while not g.done:
+                  if seat==0:g.step(a(g.observe(0)),b(g.observe(1)))
+                  else:g.step(b(g.observe(0)),a(g.observe(1)))
+              return (g.reward(seat),g.reward(1-seat))
+          for opp_name,opp in [('v48',v48),('rc5',rc5)]:
+              for seed in range(44001,44007):
+                  for seat in (0,1):
+                      x=run(base,opp,seed,seat);y=run(patch,opp,seed,seat)
+                      assert x==y,(opp_name,seed,seat,x,y)
+          print('STANDARD_EQUIVALENCE 24/24 exact reward pairs')
+          PY
+      - name: Direct clock pair under standard and ladder-real fault
+        run: |
+          python experiments/v79/cloud_field_eval.py \
+            --arena experiments/v79/clock_pair --seeds 8 --start-seed 55001 \
+            --workers 4 --modes standard,ladder_real \
+            --out experiments/v79/results/clock_pair
+      - name: Diverse field with clock candidate
+        run: |
+          python experiments/v79/cloud_field_eval.py \
+            --arena experiments/v79/clock_arena --seeds 5 --start-seed 65001 \
+            --workers 4 --modes standard,ladder_real \
+            --out experiments/v79/results/clock_field
+      - name: Package submission
+        run: |
+          cd experiments/v79/clock_artifact
+          tar -czf ../Kaggriculture_V79_1_V58_CLOCK_HARDENED.tar.gz main.py
+          cd -
+          sha256sum experiments/v79/clock_artifact/main.py experiments/v79/Kaggriculture_V79_1_V58_CLOCK_HARDENED.tar.gz > experiments/v79/results/clock_hashes.txt
+          echo PAIR; cat experiments/v79/results/clock_pair/summary.csv
+          echo FIELD; cat experiments/v79/results/clock_field/summary.csv
+          cat experiments/v79/results/clock_hashes.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: v79-v58-clock-ablation
+          path: |
+            experiments/v79/results/clock_pair
+            experiments/v79/results/clock_field
+            experiments/v79/results/clock_hashes.txt
+            experiments/v79/clock_artifact/main.py
+            experiments/v79/Kaggriculture_V79_1_V58_CLOCK_HARDENED.tar.gz
+          retention-days: 14

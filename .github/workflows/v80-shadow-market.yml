@@ -31,31 +31,29 @@ jobs:
           python experiments/v80/test_shadow.py
       - name: Build causal arena
         run: |
-          # checkout@v4 installs a repo-scoped auth header. Remove it before
-          # cloning unrelated public repositories or GitHub treats the scoped
-          # token as credentials for those repos.
           git config --local --unset-all http.https://github.com/.extraheader || true
           git clone -q --depth 1 https://github.com/sota1111/erl-kaggriculture /tmp/e
-          git clone -q --depth 1 https://github.com/Unica2804/kaggri_agent /tmp/u
           rm -rf experiments/v80/arena experiments/v80/results
           mkdir -p experiments/v80/arena experiments/v80/results
           cp /tmp/e/opponents/kaggriculture_structured_economic_policy.py experiments/v80/arena/base_v58.py
           cp /tmp/e/opponents/40_40_early_floor_39_46_top_10_v48_fast_routes.py experiments/v80/arena/base_v48.py
           cp /tmp/e/opponents/v16_rc5_high_score_8c_4s_premium_market_lead.py experiments/v80/arena/rc5.py
-          cp /tmp/u/main.py experiments/v80/arena/unica.py
+          cp /tmp/e/opponents/25_27_strict_future_v27_midgame_meta_reset.py experiments/v80/arena/strict_v27.py
+          cp /tmp/e/opponents/177_180_fresh_top_30_v21_1_conditional_memory.py experiments/v80/arena/conditional_v21.py
+          cp /tmp/e/opponents/kaggriculture_multi_route_farming_agent.py experiments/v80/arena/multiroute.py
           python experiments/v80/build_shadow_agent.py experiments/v80/arena/base_v58.py experiments/v80/arena/shadow_v58.py
           python experiments/v80/build_shadow_agent.py experiments/v80/arena/base_v48.py experiments/v80/arena/shadow_v48.py
       - name: Exact-engine diverse field
         run: |
           python experiments/v79/cloud_field_eval.py \
-            --arena experiments/v80/arena --seeds 8 --start-seed 78001 \
+            --arena experiments/v80/arena --seeds 6 --start-seed 78001 \
             --workers 4 --modes standard,ladder_real \
             --out experiments/v80/results/field
           cat experiments/v80/results/field/summary.csv
       - name: Independent holdout field
         run: |
           python experiments/v79/cloud_field_eval.py \
-            --arena experiments/v80/arena --seeds 8 --start-seed 88001 \
+            --arena experiments/v80/arena --seeds 6 --start-seed 88001 \
             --workers 4 --modes standard,ladder_real \
             --out experiments/v80/results/holdout
           cat experiments/v80/results/holdout/summary.csv

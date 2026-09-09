@@ -1,0 +1,64 @@
+name: V84 terminal portfolio
+on:
+  push:
+    branches: ["research/v84-terminal-portfolio"]
+    paths:
+      - "experiments/v84/**"
+      - ".github/workflows/v84-terminal-portfolio.yml"
+  workflow_dispatch:
+jobs:
+  gate:
+    runs-on: ubuntu-24.04
+    env: {PYTHONPATH: .}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.11"}
+      - name: Install exact simulator
+        run: |
+          pip install -q --upgrade pybind11 numpy setuptools wheel
+          pip install -q 'kagsim @ git+https://github.com/destbreso/kaggriculture-cppsim@main'
+      - name: Build agents and field
+        run: |
+          python experiments/v81/build_farming_clock_v2.py
+          python experiments/v84/build_terminal_portfolio.py
+          python -m py_compile experiments/v84/generated/*.py
+          git config --local --unset-all http.https://github.com/.extraheader || true
+          git clone -q --depth 1 https://github.com/sota1111/erl-kaggriculture /tmp/e
+          mkdir -p experiments/v84/arena experiments/v84/results experiments/v84/submission
+          cp experiments/v81/generated/v81_farming_clock.py experiments/v84/arena/v81_clock.py
+          cp experiments/v84/generated/v84_terminal_portfolio.py experiments/v84/arena/v84_terminal.py
+          cp /tmp/e/opponents/kaggriculture_structured_economic_policy.py experiments/v84/arena/v58.py
+          cp /tmp/e/opponents/40_40_early_floor_39_46_top_10_v48_fast_routes.py experiments/v84/arena/v48.py
+          cp /tmp/e/opponents/v16_rc5_high_score_8c_4s_premium_market_lead.py experiments/v84/arena/rc5.py
+      - name: Exact field
+        run: |
+          python experiments/v79/cloud_field_eval.py \
+            --arena experiments/v84/arena --seeds 6 --start-seed 130001 \
+            --workers 4 --modes standard,ladder_real --out experiments/v84/results/field
+          cat experiments/v84/results/field/summary.csv
+      - name: Pairwise monotonicity and package
+        run: |
+          python - <<'PY'
+          import json,pathlib,shutil,tarfile,hashlib
+          root=pathlib.Path('experiments/v84')
+          d=json.loads((root/'results/field/field_results.json').read_text())['summary']
+          c=d['v84_terminal']; b=d['v81_clock']
+          promote=(c['errors']==0 and c['win_rate']>=b['win_rate'] and c['margin_mean']>=b['margin_mean']+100 and c['margin_cvar10']>=b['margin_cvar10'])
+          report={'candidate':c,'base':b,'promote':promote}
+          (root/'results/promotion.json').write_text(json.dumps(report,indent=2)+'\n')
+          print(json.dumps(report,indent=2))
+          shutil.copy(root/'generated/v84_terminal_portfolio.py',root/'submission/main.py')
+          tar=root/'Kaggriculture_V84_TERMINAL_PORTFOLIO.tar.gz'
+          with tarfile.open(tar,'w:gz') as tf: tf.add(root/'submission/main.py',arcname='main.py')
+          print('MAIN',hashlib.sha256((root/'submission/main.py').read_bytes()).hexdigest())
+          print('TAR',hashlib.sha256(tar.read_bytes()).hexdigest())
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: v84-terminal-portfolio
+          path: |
+            experiments/v84/results
+            experiments/v84/submission/main.py
+            experiments/v84/Kaggriculture_V84_TERMINAL_PORTFOLIO.tar.gz
+          retention-days: 14

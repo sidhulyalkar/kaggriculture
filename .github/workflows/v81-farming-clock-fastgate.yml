@@ -1,0 +1,45 @@
+name: V81 Farming clock fast gate
+
+on:
+  push:
+    branches: [research/v81-v57-state-router]
+    paths: ['.github/workflows/v81-farming-clock-fastgate.yml']
+  workflow_dispatch:
+
+permissions: {contents: read}
+
+jobs:
+  gate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env: {PYTHONPATH: .}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: '3.11'}
+      - run: |
+          pip install -q --upgrade pybind11 numpy setuptools wheel
+          pip install -q 'kagsim @ git+https://github.com/destbreso/kaggriculture-cppsim@main'
+      - name: Build
+        run: |
+          python experiments/v81/build_farming_clock_v2.py
+          mkdir -p experiments/v81/fast_pair experiments/v81/fast_results experiments/v81/fast_submission
+          cp experiments/v81/generated/base_farming_v3.py experiments/v81/fast_pair/base.py
+          cp experiments/v81/generated/v81_farming_clock.py experiments/v81/fast_pair/v81.py
+      - name: Exact direct pair standard plus ladder-real
+        run: |
+          python experiments/v79/cloud_field_eval.py --arena experiments/v81/fast_pair --seeds 8 --start-seed 99101 --workers 4 --modes standard,ladder_real --out experiments/v81/fast_results/pair
+          cat experiments/v81/fast_results/pair/summary.csv
+      - name: Package
+        run: |
+          cp experiments/v81/generated/v81_farming_clock.py experiments/v81/fast_submission/main.py
+          cd experiments/v81/fast_submission && tar -czf ../Kaggriculture_V81_1_FARMING_V3_CLOCK_HARDENED.tar.gz main.py && cd -
+          sha256sum experiments/v81/fast_submission/main.py experiments/v81/Kaggriculture_V81_1_FARMING_V3_CLOCK_HARDENED.tar.gz
+      - uses: actions/upload-artifact@v4
+        with:
+          name: v81-farming-clock-fastgate
+          path: |
+            experiments/v81/Kaggriculture_V81_1_FARMING_V3_CLOCK_HARDENED.tar.gz
+            experiments/v81/fast_submission/main.py
+            experiments/v81/fast_results
+          retention-days: 14

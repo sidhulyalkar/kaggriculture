@@ -1,0 +1,94 @@
+name: V81 Farming V3 clock qualification v2
+
+on:
+  push:
+    branches: [research/v81-v57-state-router]
+    paths:
+      - 'experiments/v81/build_farming_clock_v2.py'
+      - '.github/workflows/v81-farming-clock-v2.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  qualify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 55
+    env: {PYTHONPATH: .}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: '3.11'}
+      - name: Install exact simulator
+        run: |
+          pip install -q --upgrade pybind11 numpy setuptools wheel
+          pip install -q 'kagsim @ git+https://github.com/destbreso/kaggriculture-cppsim@main'
+      - name: Build current source candidate
+        run: |
+          python experiments/v81/build_farming_clock_v2.py
+          python -m py_compile experiments/v81/generated/*.py
+      - name: Fetch field
+        run: |
+          git config --local --unset-all http.https://github.com/.extraheader || true
+          git clone -q --depth 1 https://github.com/sota1111/erl-kaggriculture /tmp/e
+          mkdir -p experiments/v81/clock_arena experiments/v81/clock_pair experiments/v81/results experiments/v81/submission
+          cp experiments/v81/generated/base_farming_v3.py experiments/v81/clock_arena/base_farming_v3.py
+          cp experiments/v81/generated/v81_farming_clock.py experiments/v81/clock_arena/v81_farming_clock.py
+          cp /tmp/e/opponents/kaggriculture_structured_economic_policy.py experiments/v81/clock_arena/v58.py
+          cp /tmp/e/opponents/40_40_early_floor_39_46_top_10_v48_fast_routes.py experiments/v81/clock_arena/v48.py
+          cp /tmp/e/opponents/v16_rc5_high_score_8c_4s_premium_market_lead.py experiments/v81/clock_arena/rc5.py
+          cp /tmp/e/opponents/kaggriculture_multi_route_farming_agent.py experiments/v81/clock_arena/multiroute.py
+          cp experiments/v81/generated/base_farming_v3.py experiments/v81/clock_pair/base_farming_v3.py
+          cp experiments/v81/generated/v81_farming_clock.py experiments/v81/clock_pair/v81_farming_clock.py
+      - name: Standard equivalence
+        run: |
+          python - <<'PY'
+          import importlib.util, kagsim
+          def load(path,name):
+              s=importlib.util.spec_from_file_location(name,path);m=importlib.util.module_from_spec(s);s.loader.exec_module(m);return m.agent
+          def run(a,b,seed,seat):
+              g=kagsim.Game(seed)
+              while not g.done:
+                  if seat==0:g.step(a(g.observe(0)),b(g.observe(1)))
+                  else:g.step(b(g.observe(0)),a(g.observe(1)))
+              return g.reward(seat),g.reward(1-seat)
+          for oppfile in ('v48.py','rc5.py'):
+              for seed in range(93001,93005):
+                  for seat in (0,1):
+                      base=load('experiments/v81/generated/base_farming_v3.py',f'b{seed}{seat}{oppfile}')
+                      patch=load('experiments/v81/generated/v81_farming_clock.py',f'p{seed}{seat}{oppfile}')
+                      opp1=load('experiments/v81/clock_arena/'+oppfile,f'o1{seed}{seat}{oppfile}')
+                      opp2=load('experiments/v81/clock_arena/'+oppfile,f'o2{seed}{seat}{oppfile}')
+                      x=run(base,opp1,seed,seat);y=run(patch,opp2,seed,seat)
+                      assert x==y,(oppfile,seed,seat,x,y)
+          print('STANDARD_EQUIVALENCE 16/16')
+          PY
+      - name: Direct pair
+        run: |
+          python experiments/v79/cloud_field_eval.py --arena experiments/v81/clock_pair --seeds 8 --start-seed 94001 --workers 4 --modes standard,ladder_real --out experiments/v81/results/pair
+          cat experiments/v81/results/pair/summary.csv
+      - name: Diverse field
+        run: |
+          python experiments/v79/cloud_field_eval.py --arena experiments/v81/clock_arena --seeds 4 --start-seed 95001 --workers 4 --modes standard,ladder_real --out experiments/v81/results/field
+          cat experiments/v81/results/field/summary.csv
+      - name: Package
+        run: |
+          cp experiments/v81/generated/v81_farming_clock.py experiments/v81/submission/main.py
+          cd experiments/v81/submission && tar -czf ../Kaggriculture_V81_1_FARMING_V3_CLOCK_HARDENED.tar.gz main.py && cd -
+          python - <<'PY'
+          import hashlib,pathlib,tarfile
+          p=pathlib.Path('experiments/v81/Kaggriculture_V81_1_FARMING_V3_CLOCK_HARDENED.tar.gz')
+          with tarfile.open(p,'r:gz') as tf: assert tf.getnames()==['main.py']
+          print('MAIN',hashlib.sha256(pathlib.Path('experiments/v81/submission/main.py').read_bytes()).hexdigest())
+          print('TAR',hashlib.sha256(p.read_bytes()).hexdigest())
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: v81-farming-v3-clock-qualified-v2
+          path: |
+            experiments/v81/Kaggriculture_V81_1_FARMING_V3_CLOCK_HARDENED.tar.gz
+            experiments/v81/submission/main.py
+            experiments/v81/generated/manifest.json
+            experiments/v81/results
+          retention-days: 14

@@ -1,0 +1,38 @@
+name: V81 public strategy harvest
+
+on:
+  push:
+    branches: [research/v81-v57-state-router]
+    paths:
+      - 'experiments/v81/**'
+      - '.github/workflows/v81-public-source-harvest.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  harvest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: '3.11'}
+      - name: Probe public Kaggle artifacts
+        run: python experiments/v81/public_source_probe.py
+      - name: Summarize useful payloads
+        run: |
+          python - <<'PY'
+          import json, pathlib
+          p=pathlib.Path('experiments/v81/harvest/probe_manifest.json')
+          rows=json.loads(p.read_text())
+          for r in rows:
+              if r['status'] == 200:
+                  print('OK', r['label'], r['kind'], r['content_type'], r['bytes'], r['file'])
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: v81-public-strategy-harvest
+          path: experiments/v81/harvest
+          retention-days: 14

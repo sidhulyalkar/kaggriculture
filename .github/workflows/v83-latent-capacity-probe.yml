@@ -1,0 +1,37 @@
+name: V83 latent capacity probe
+on:
+  push:
+    branches: ["research/v83-latent-capacity-probe"]
+    paths:
+      - "experiments/v83/**"
+      - ".github/workflows/v83-latent-capacity-probe.yml"
+  workflow_dispatch:
+jobs:
+  probe:
+    runs-on: ubuntu-24.04
+    env: {PYTHONPATH: .}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.11"}
+      - name: Install exact simulator
+        run: |
+          pip install -q --upgrade pybind11 numpy setuptools wheel
+          pip install -q 'kagsim @ git+https://github.com/destbreso/kaggriculture-cppsim@main'
+      - name: Build V81 and opponent
+        run: |
+          python experiments/v81/build_farming_clock_v2.py
+          git config --local --unset-all http.https://github.com/.extraheader || true
+          git clone -q --depth 1 https://github.com/sota1111/erl-kaggriculture /tmp/e
+          mkdir -p experiments/v83/results
+      - name: Probe turn 313 both seats
+        run: |
+          python experiments/v83/probe_latent_capacity.py \
+            --base experiments/v81/generated/v81_farming_clock.py \
+            --opp /tmp/e/opponents/kaggriculture_structured_economic_policy.py \
+            --start-seed 120001 --seeds 4 --out experiments/v83/results/probe.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: v83-latent-capacity-probe
+          path: experiments/v83/results
+          retention-days: 14

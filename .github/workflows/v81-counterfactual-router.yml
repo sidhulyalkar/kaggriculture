@@ -1,0 +1,69 @@
+name: V81 counterfactual three-day router
+
+on:
+  push:
+    branches: [research/v81-v57-state-router]
+    paths:
+      - 'experiments/v81/route_counterfactual.py'
+      - '.github/workflows/v81-counterfactual-router.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  search:
+    runs-on: ubuntu-latest
+    timeout-minutes: 65
+    env: {PYTHONPATH: .}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: '3.11'}
+      - name: Install exact simulator
+        run: |
+          pip install -q --upgrade pybind11 numpy setuptools wheel
+          pip install -q 'kagsim @ git+https://github.com/destbreso/kaggriculture-cppsim@main'
+      - name: Build current Farming base and field
+        run: |
+          python experiments/v81/build_farming_clock_v2.py
+          git config --local --unset-all http.https://github.com/.extraheader || true
+          git clone -q --depth 1 https://github.com/sota1111/erl-kaggriculture /tmp/e
+          mkdir -p experiments/v81/cf_train_opp experiments/v81/cf_field experiments/v81/cf_results experiments/v81/cf_submission
+          cp /tmp/e/opponents/kaggriculture_structured_economic_policy.py experiments/v81/cf_train_opp/v58.py
+          cp /tmp/e/opponents/40_40_early_floor_39_46_top_10_v48_fast_routes.py experiments/v81/cf_train_opp/v48.py
+          cp /tmp/e/opponents/v16_rc5_high_score_8c_4s_premium_market_lead.py experiments/v81/cf_train_opp/rc5.py
+          cp /tmp/e/opponents/kaggriculture_multi_route_farming_agent.py experiments/v81/cf_train_opp/multiroute.py
+      - name: Counterfactual route search
+        run: |
+          python experiments/v81/route_counterfactual.py \
+            --base experiments/v81/generated/v81_farming_clock.py \
+            --opponents experiments/v81/cf_train_opp/v58.py experiments/v81/cf_train_opp/v48.py experiments/v81/cf_train_opp/rc5.py experiments/v81/cf_train_opp/multiroute.py \
+            --start-seed 97001 --seeds 6 --workers 4 --out experiments/v81/cf_results/search
+      - name: Build held-out field
+        run: |
+          cp experiments/v81/generated/v81_farming_clock.py experiments/v81/cf_field/v81_clock.py
+          cp experiments/v81/cf_results/search/v81_counterfactual.py experiments/v81/cf_field/v81_counterfactual.py
+          cp /tmp/e/opponents/kaggriculture_structured_economic_policy.py experiments/v81/cf_field/v58.py
+          cp /tmp/e/opponents/40_40_early_floor_39_46_top_10_v48_fast_routes.py experiments/v81/cf_field/v48.py
+          cp /tmp/e/opponents/v16_rc5_high_score_8c_4s_premium_market_lead.py experiments/v81/cf_field/rc5.py
+          cp /tmp/e/opponents/kaggriculture_multi_route_farming_agent.py experiments/v81/cf_field/multiroute.py
+          cp /tmp/e/opponents/25_27_strict_future_v27_midgame_meta_reset.py experiments/v81/cf_field/strict_v27.py
+          cp /tmp/e/opponents/177_180_fresh_top_30_v21_1_conditional_memory.py experiments/v81/cf_field/conditional_v21.py
+      - name: Held-out exact field
+        run: |
+          python experiments/v79/cloud_field_eval.py --arena experiments/v81/cf_field --seeds 4 --start-seed 98001 --workers 4 --modes standard,ladder_real --out experiments/v81/cf_results/field
+          cat experiments/v81/cf_results/field/summary.csv
+      - name: Package experimental candidate
+        run: |
+          cp experiments/v81/cf_results/search/v81_counterfactual.py experiments/v81/cf_submission/main.py
+          cd experiments/v81/cf_submission && tar -czf ../Kaggriculture_V81_2_COUNTERFACTUAL_3DAY_ROUTER.tar.gz main.py && cd -
+          python -m py_compile experiments/v81/cf_submission/main.py
+      - uses: actions/upload-artifact@v4
+        with:
+          name: v81-counterfactual-router
+          path: |
+            experiments/v81/Kaggriculture_V81_2_COUNTERFACTUAL_3DAY_ROUTER.tar.gz
+            experiments/v81/cf_submission/main.py
+            experiments/v81/cf_results
+          retention-days: 14

@@ -1,0 +1,72 @@
+name: V85 shape terminal
+on:
+  push:
+    branches: ["research/v85-shape-terminal"]
+    paths:
+      - "experiments/v85/**"
+      - ".github/workflows/v85-shape-terminal.yml"
+  workflow_dispatch:
+jobs:
+  gate:
+    runs-on: ubuntu-24.04
+    env: {PYTHONPATH: .}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.11"}
+      - name: Install exact simulator
+        run: |
+          pip install -q --upgrade pybind11 numpy setuptools wheel
+          pip install -q 'kagsim @ git+https://github.com/destbreso/kaggriculture-cppsim@main'
+      - name: Pull current public sources
+        run: |
+          python experiments/v82/pull_fresh_opponents.py
+          mkdir -p experiments/v85
+          cp experiments/v82/fresh_opponents/shape_current.py experiments/v85/current_shape.py
+          cp experiments/v82/fresh_opponents/farming_math.py experiments/v85/farming_math.py
+          sha256sum experiments/v85/current_shape.py experiments/v85/farming_math.py
+      - name: Build Shape terminal candidate
+        run: |
+          python experiments/v85/build_shape_terminal.py
+          python -m py_compile experiments/v85/generated/v85_shape_terminal.py
+          git config --local --unset-all http.https://github.com/.extraheader || true
+          git clone -q --depth 1 https://github.com/sota1111/erl-kaggriculture /tmp/e
+          python experiments/v81/build_farming_clock_v2.py
+          mkdir -p experiments/v85/arena experiments/v85/results experiments/v85/submission
+          cp experiments/v85/current_shape.py experiments/v85/arena/shape_current.py
+          cp experiments/v85/farming_math.py experiments/v85/arena/farming_math.py
+          cp experiments/v85/generated/v85_shape_terminal.py experiments/v85/arena/v85_shape_terminal.py
+          cp experiments/v81/generated/v81_farming_clock.py experiments/v85/arena/v81_clock.py
+          cp /tmp/e/opponents/kaggriculture_structured_economic_policy.py experiments/v85/arena/v58.py
+      - name: Exact fresh field
+        run: |
+          python experiments/v79/cloud_field_eval.py \
+            --arena experiments/v85/arena --seeds 5 --start-seed 140001 \
+            --workers 4 --modes standard,ladder_real --out experiments/v85/results/field
+          cat experiments/v85/results/field/summary.csv
+      - name: Promotion and package
+        run: |
+          python - <<'PY'
+          import json,pathlib,shutil,tarfile,hashlib
+          root=pathlib.Path('experiments/v85')
+          d=json.loads((root/'results/field/field_results.json').read_text())['summary']
+          c=d['v85_shape_terminal']; b=d['shape_current']
+          # In a Bradley-Terry competition, even tiny strictly-positive final-cash gains matter.
+          promote=(c['errors']==0 and c['win_rate']>=b['win_rate'] and c['margin_mean']>=b['margin_mean'] and c['margin_cvar10']>=b['margin_cvar10'])
+          report={'candidate':c,'base_shape':b,'promote':promote}
+          (root/'results/promotion.json').write_text(json.dumps(report,indent=2)+'\n')
+          print(json.dumps(report,indent=2))
+          shutil.copy(root/'generated/v85_shape_terminal.py',root/'submission/main.py')
+          tar=root/'Kaggriculture_V85_SHAPE_TERMINAL.tar.gz'
+          with tarfile.open(tar,'w:gz') as tf: tf.add(root/'submission/main.py',arcname='main.py')
+          print('MAIN',hashlib.sha256((root/'submission/main.py').read_bytes()).hexdigest())
+          print('TAR',hashlib.sha256(tar.read_bytes()).hexdigest())
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: v85-shape-terminal
+          path: |
+            experiments/v85/results
+            experiments/v85/submission/main.py
+            experiments/v85/Kaggriculture_V85_SHAPE_TERMINAL.tar.gz
+          retention-days: 14

@@ -4,6 +4,7 @@ on:
     branches: [research/v91-meta-options]
     paths:
       - 'experiments/v91/build_topmeta_ablation.py'
+      - 'experiments/v91/eval_candidates.py'
       - '.github/workflows/v93-topmeta-ablation.yml'
   workflow_dispatch:
 jobs:
@@ -26,10 +27,10 @@ jobs:
           python experiments/v91/build_current_opponents.py
       - name: Discovery
         run: |
-          python experiments/v91/eval_candidates.py --candidates experiments/v93/generated --opponents experiments/v91/opponents --seeds 10 --start-seed 810001 --clock-seeds 1 --workers 6 --out experiments/v93/discovery.json
+          python experiments/v91/eval_candidates.py --base c95 --candidates experiments/v93/generated --opponents experiments/v91/opponents --seeds 10 --start-seed 810001 --clock-seeds 1 --workers 6 --out experiments/v93/discovery.json
       - name: Holdout
         run: |
-          python experiments/v91/eval_candidates.py --candidates experiments/v93/generated --opponents experiments/v91/opponents --seeds 12 --start-seed 910001 --clock-seeds 1 --workers 6 --out experiments/v93/holdout.json
+          python experiments/v91/eval_candidates.py --base c95 --candidates experiments/v93/generated --opponents experiments/v91/opponents --seeds 12 --start-seed 910001 --clock-seeds 1 --workers 6 --out experiments/v93/holdout.json
       - name: Report
         run: |
           python - <<'PY'

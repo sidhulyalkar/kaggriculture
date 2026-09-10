@@ -1,0 +1,87 @@
+name: V86 Shape anti-mirror
+on:
+  push:
+    branches: ["research/v86-shape-antimirror"]
+    paths:
+      - "experiments/v86/**"
+      - ".github/workflows/v86-shape-antimirror.yml"
+  workflow_dispatch:
+
+jobs:
+  search:
+    runs-on: ubuntu-24.04
+    env: {PYTHONPATH: .}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.11"}
+
+      - name: Install exact simulator
+        run: |
+          pip install -q --upgrade pybind11 numpy setuptools wheel
+          pip install -q 'kagsim @ git+https://github.com/destbreso/kaggriculture-cppsim@main'
+
+      - name: Pull current public sources and build variants
+        run: |
+          python experiments/v82/pull_fresh_opponents.py
+          mkdir -p experiments/v86
+          cp experiments/v82/fresh_opponents/shape_current.py experiments/v86/current_shape.py
+          cp experiments/v82/fresh_opponents/farming_math.py experiments/v86/farming_math.py
+          python experiments/v86/build_antimirror_variants.py
+          python -m py_compile experiments/v86/generated/*.py
+          sha256sum experiments/v86/current_shape.py experiments/v86/farming_math.py
+
+      - name: Build durable opponent zoo
+        run: |
+          git config --local --unset-all http.https://github.com/.extraheader || true
+          git clone -q --depth 1 https://github.com/sota1111/erl-kaggriculture /tmp/e
+          python experiments/v81/build_farming_clock_v2.py
+
+      - name: Mirror discovery screen
+        run: |
+          rm -rf experiments/v86/results experiments/v86/mirror_arena
+          mkdir -p experiments/v86/results/mirror experiments/v86/mirror_arena
+          for mode in suppress_226 force_226 suppress_360 force_360 suppress_433 force_433; do
+            arena="experiments/v86/mirror_arena/$mode"
+            mkdir -p "$arena"
+            cp "experiments/v86/generated/v86_${mode}.py" "$arena/v86_${mode}.py"
+            cp experiments/v86/current_shape.py "$arena/shape_current.py"
+            cp experiments/v86/farming_math.py "$arena/farming_math.py"
+            python experiments/v79/cloud_field_eval.py \
+              --arena "$arena" --seeds 4 --start-seed 150001 \
+              --workers 4 --modes standard,ladder_real \
+              --out "experiments/v86/results/mirror/$mode"
+          done
+          python experiments/v86/select_antimirror.py select
+
+      - name: Independent diverse holdout
+        run: |
+          mode=$(cat experiments/v86/results/selected.txt)
+          arena=experiments/v86/holdout_arena
+          rm -rf "$arena"
+          mkdir -p "$arena"
+          cp "experiments/v86/generated/v86_${mode}.py" "$arena/v86_${mode}.py"
+          cp experiments/v86/current_shape.py "$arena/shape_current.py"
+          cp experiments/v86/farming_math.py "$arena/farming_math.py"
+          cp experiments/v81/generated/v81_farming_clock.py "$arena/v81_clock.py"
+          cp /tmp/e/opponents/kaggriculture_structured_economic_policy.py "$arena/v58.py"
+          cp /tmp/e/opponents/40_40_early_floor_39_46_top_10_v48_fast_routes.py "$arena/v48.py"
+          cp /tmp/e/opponents/v16_rc5_high_score_8c_4s_premium_market_lead.py "$arena/rc5.py"
+          python experiments/v79/cloud_field_eval.py \
+            --arena "$arena" --seeds 6 --start-seed 160001 \
+            --workers 4 --modes standard,ladder_real \
+            --out experiments/v86/results/holdout
+          cat experiments/v86/results/holdout/summary.csv
+
+      - name: Promotion gate and package
+        run: |
+          python experiments/v86/select_antimirror.py promote
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: v86-shape-antimirror
+          path: |
+            experiments/v86/results
+            experiments/v86/submission/main.py
+            experiments/v86/Kaggriculture_V86_SHAPE_ANTIMIRROR_*.tar.gz
+          retention-days: 14

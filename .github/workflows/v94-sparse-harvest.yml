@@ -1,0 +1,25 @@
+name: V94 sparse hybrid harvest
+on:
+  push:
+    branches: [research/v91-meta-options]
+    paths:
+      - 'experiments/v94/**'
+      - '.github/workflows/v94-sparse-harvest.yml'
+  workflow_dispatch:
+jobs:
+  harvest:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: '3.11'}
+      - name: Harvest exact current sparse hybrid
+        run: |
+          python experiments/v94/harvest_sparse_hybrid.py
+          cat experiments/v94/harvest/report.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: v94-sparse-hybrid-harvest
+          path: experiments/v94/harvest
+          retention-days: 14

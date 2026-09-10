@@ -1,0 +1,47 @@
+name: V93 top-meta ablation
+on:
+  push:
+    branches: [research/v91-meta-options]
+    paths:
+      - 'experiments/v91/build_topmeta_ablation.py'
+      - '.github/workflows/v93-topmeta-ablation.yml'
+  workflow_dispatch:
+jobs:
+  ablate:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 75
+    env: {PYTHONPATH: .}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: '3.11'}
+      - name: Install exact simulator
+        run: |
+          pip install -q --upgrade pybind11 numpy setuptools wheel
+          pip install -q 'kagsim @ git+https://github.com/destbreso/kaggriculture-cppsim@main'
+      - name: Build agents and current field
+        run: |
+          rm -rf experiments/v93 experiments/v91/opponents
+          python experiments/v91/build_topmeta_ablation.py
+          python experiments/v91/build_current_opponents.py
+      - name: Discovery
+        run: |
+          python experiments/v91/eval_candidates.py --candidates experiments/v93/generated --opponents experiments/v91/opponents --seeds 10 --start-seed 810001 --clock-seeds 1 --workers 6 --out experiments/v93/discovery.json
+      - name: Holdout
+        run: |
+          python experiments/v91/eval_candidates.py --candidates experiments/v93/generated --opponents experiments/v91/opponents --seeds 12 --start-seed 910001 --clock-seeds 1 --workers 6 --out experiments/v93/holdout.json
+      - name: Report
+        run: |
+          python - <<'PY'
+          import json
+          for f in ['discovery.json','holdout.json']:
+            print('\n===',f,'===')
+            d=json.load(open('experiments/v93/'+f))['summary']
+            for n,s in sorted(d.items(),key=lambda kv:(kv[1]['bt'],kv[1]['worst_opponent_bt'],kv[1]['mean_margin']),reverse=True):
+              print(n,'BT',round(s['bt'],3),'worst',round(s['worst_opponent_bt'],3),'margin',round(s['mean_margin']),'seat',round(s['seat0_bt'],3),round(s['seat1_bt'],3),'clock',round(s['clock_fault_bt'],3),'err',s['errors'],s['per_opponent_bt'])
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: v93-topmeta-ablation
+          path: experiments/v93
+          retention-days: 14

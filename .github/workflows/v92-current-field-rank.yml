@@ -1,0 +1,64 @@
+name: V92 current field rank
+
+on:
+  push:
+    branches: [research/v91-meta-options]
+    paths:
+      - '.github/workflows/v92-current-field-rank.yml'
+  workflow_dispatch:
+
+jobs:
+  rank:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 75
+    env:
+      PYTHONPATH: .
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install exact simulator
+        run: |
+          pip install -q --upgrade pybind11 numpy setuptools wheel
+          pip install -q 'kagsim @ git+https://github.com/destbreso/kaggriculture-cppsim@main'
+      - name: Build current executable field
+        run: |
+          rm -rf experiments/v92 && mkdir -p experiments/v92
+          python experiments/v91/build_current_opponents.py
+          python experiments/v91/build_c95_memory_variants.py --out experiments/v91/generated
+          mkdir -p experiments/v92/candidates
+          for p in experiments/v91/opponents/*.py; do n=$(basename "$p" .py); mkdir -p "experiments/v92/candidates/$n"; cp "$p" "experiments/v92/candidates/$n/main.py"; done
+          mkdir -p experiments/v92/candidates/c95_clock
+          cp experiments/v91/generated/c95_clock/main.py experiments/v92/candidates/c95_clock/main.py
+          python -m py_compile experiments/v92/candidates/*/main.py
+      - name: Discovery field
+        run: |
+          python experiments/v91/eval_candidates.py \
+            --candidates experiments/v92/candidates \
+            --opponents experiments/v91/opponents \
+            --seeds 10 --start-seed 610001 --clock-seeds 0 --workers 6 \
+            --out experiments/v92/discovery.json
+      - name: Independent holdout field
+        run: |
+          python experiments/v91/eval_candidates.py \
+            --candidates experiments/v92/candidates \
+            --opponents experiments/v91/opponents \
+            --seeds 12 --start-seed 710001 --clock-seeds 0 --workers 6 \
+            --out experiments/v92/holdout.json
+      - name: Rank and report
+        run: |
+          python - <<'PY'
+          import json
+          for fname in ['discovery.json','holdout.json']:
+              d=json.load(open('experiments/v92/'+fname))['summary']
+              print('\n===',fname,'===')
+              for n,s in sorted(d.items(),key=lambda kv:(kv[1]['bt'],kv[1]['worst_opponent_bt'],kv[1]['mean_margin']),reverse=True):
+                  print(f"{n:22s} BT={s['bt']:.3f} worst={s['worst_opponent_bt']:.3f} margin={s['mean_margin']:+.0f} seat={s['seat0_bt']:.3f}/{s['seat1_bt']:.3f} errors={s['errors']}")
+                  print('  ',s['per_opponent_bt'])
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: v92-current-field-rank
+          path: experiments/v92
+          retention-days: 14

@@ -4,7 +4,6 @@ import argparse
 import hashlib
 import importlib.util
 import json
-import math
 import os
 import statistics
 import sys
@@ -62,7 +61,7 @@ def bt(rows):
     return sum(1.0 if r["margin"]>0 else 0.5 if r["margin"]==0 else 0.0 for r in rows)/len(rows)
 
 
-def summarize(rows,names,base="c95_clock"):
+def summarize(rows,names,base):
     out={}
     bykey={(r["candidate"],r["opponent"],r["seed"],r["seat"],r["clock_fault"]):r for r in rows}
     for name in names:
@@ -91,12 +90,12 @@ def summarize(rows,names,base="c95_clock"):
 
 
 def main():
-    ap=argparse.ArgumentParser(); ap.add_argument('--candidates',required=True); ap.add_argument('--opponents',required=True); ap.add_argument('--seeds',type=int,default=10); ap.add_argument('--start-seed',type=int,default=310001); ap.add_argument('--workers',type=int,default=4); ap.add_argument('--clock-seeds',type=int,default=2); ap.add_argument('--out',required=True); a=ap.parse_args()
+    ap=argparse.ArgumentParser(); ap.add_argument('--candidates',required=True); ap.add_argument('--opponents',required=True); ap.add_argument('--seeds',type=int,default=10); ap.add_argument('--start-seed',type=int,default=310001); ap.add_argument('--workers',type=int,default=4); ap.add_argument('--clock-seeds',type=int,default=2); ap.add_argument('--base',default='c95_clock'); ap.add_argument('--out',required=True); a=ap.parse_args()
     import kagsim
     assert getattr(kagsim,'ENGINE_VERSION','')=='1.32.7'
     cands={p.parent.name:str(p.resolve()) for p in Path(a.candidates).glob('*/main.py')}
     opps={p.stem:str(p.resolve()) for p in Path(a.opponents).glob('*.py')}
-    if 'c95_clock' not in cands: raise SystemExit('c95_clock control missing')
+    if a.base not in cands: raise SystemExit(f'{a.base} control missing; have {sorted(cands)}')
     tasks=[]
     for name,path in cands.items():
         for opp,op in opps.items():
@@ -104,10 +103,10 @@ def main():
                 for seat in (0,1): tasks.append((name,path,opp,op,seed,seat,False))
             for seed in range(a.start_seed+9000,a.start_seed+9000+a.clock_seeds):
                 for seat in (0,1): tasks.append((name,path,opp,op,seed,seat,True))
-    print('engine',kagsim.ENGINE_VERSION,'candidates',sorted(cands),'opponents',sorted(opps),'tasks',len(tasks))
+    print('engine',kagsim.ENGINE_VERSION,'base',a.base,'candidates',sorted(cands),'opponents',sorted(opps),'tasks',len(tasks))
     with ProcessPoolExecutor(max_workers=a.workers) as ex: rows=list(ex.map(one,tasks,chunksize=1))
-    summary=summarize(rows,sorted(cands))
-    payload={'engine':kagsim.ENGINE_VERSION,'start_seed':a.start_seed,'seeds':a.seeds,'opponents':sorted(opps),'summary':summary}
+    summary=summarize(rows,sorted(cands),a.base)
+    payload={'engine':kagsim.ENGINE_VERSION,'base':a.base,'start_seed':a.start_seed,'seeds':a.seeds,'opponents':sorted(opps),'summary':summary}
     out=Path(a.out); out.parent.mkdir(parents=True,exist_ok=True); out.write_text(json.dumps(payload,indent=2)+'\n'); out.with_suffix('.jsonl').write_text(''.join(json.dumps(r,separators=(',',':'))+'\n' for r in rows))
     for n,s in sorted(summary.items(),key=lambda kv:(kv[1]['bt'],kv[1]['worst_opponent_bt'],kv[1]['mean_margin']),reverse=True):
         print(f"{n:18s} BT={s['bt']:.3f} worst={s['worst_opponent_bt']:.3f} margin={s['mean_margin']:+.0f} seat={s['seat0_bt']:.3f}/{s['seat1_bt']:.3f} changed={s['paired_changed']} rescue={s['rescued_base_nonwins']} sacrifice={s['sacrificed_base_wins']} clock={s['clock_fault_bt']:.3f} err={s['errors']}")

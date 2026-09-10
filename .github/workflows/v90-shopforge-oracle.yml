@@ -1,0 +1,87 @@
+name: V90 ShopForge causal recalibration
+
+on:
+  push:
+    branches: [research/v90-shopforge-oracle]
+    paths:
+      - 'experiments/v90/**'
+      - '.github/workflows/v90-shopforge-oracle.yml'
+  workflow_dispatch:
+
+jobs:
+  oracle-and-field:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    env:
+      PYTHONPATH: .
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install exact simulator
+        run: |
+          pip install -q --upgrade pybind11 numpy setuptools wheel
+          pip install -q 'kagsim @ git+https://github.com/destbreso/kaggriculture-cppsim@main'
+      - name: Build ShopForge counterfactual routes
+        run: |
+          python experiments/v90/build_shopforge_variants.py --out experiments/v90/generated
+          python -m py_compile experiments/v90/generated/*/main.py
+      - name: Assemble independent opponent families
+        run: |
+          python experiments/v82/pull_fresh_opponents.py
+          mkdir -p experiments/v90/opponents
+          cp experiments/v82/fresh_opponents/shape_current.py experiments/v90/opponents/shape.py
+          cp experiments/v82/fresh_opponents/farming_math.py experiments/v90/opponents/farming_math.py
+          git config --local --unset-all http.https://github.com/.extraheader || true
+          rm -rf /tmp/erl && git clone -q --depth 1 https://github.com/sota1111/erl-kaggriculture /tmp/erl
+          python experiments/v81/build_farming_clock_v2.py
+          cp experiments/v81/generated/v81_farming_clock.py experiments/v90/opponents/v81_clock.py
+          cp /tmp/erl/opponents/kaggriculture_structured_economic_policy.py experiments/v90/opponents/v58.py
+          cp /tmp/erl/opponents/40_40_early_floor_39_46_top_10_v48_fast_routes.py experiments/v90/opponents/v48.py
+          cp /tmp/erl/opponents/v16_rc5_high_score_8c_4s_premium_market_lead.py experiments/v90/opponents/rc5.py
+          python -m py_compile experiments/v90/opponents/*.py
+      - name: Build exact route oracle
+        run: |
+          mkdir -p experiments/v90/results
+          python experiments/v90/shopforge_oracle.py \
+            --route0 experiments/v90/generated/route0/main.py \
+            --route1 experiments/v90/generated/route1/main.py \
+            --opponents experiments/v90/opponents \
+            --seeds 10 --start-seed 190001 --workers 4 \
+            --out experiments/v90/results/oracle.jsonl
+      - name: Search sparse public-state rule
+        run: |
+          python experiments/v90/analyze_shopforge_oracle.py \
+            --data experiments/v90/results/oracle.jsonl \
+            --out experiments/v90/results/oracle_report.json
+          cat experiments/v90/results/selected_params.json
+      - name: Rebuild selected rule
+        run: |
+          BAKERY=$(python -c "import json;d=json.load(open('experiments/v90/results/selected_params.json'));print(d['bakery'])")
+          PET=$(python -c "import json;d=json.load(open('experiments/v90/results/selected_params.json'));print(d['pet'])")
+          python experiments/v90/build_shopforge_variants.py --out experiments/v90/generated --bakery "$BAKERY" --pet "$PET"
+      - name: Fresh exact mixed-field gate
+        run: |
+          rm -rf experiments/v90/arena && mkdir -p experiments/v90/arena
+          cp -r experiments/v90/generated/public_control experiments/v90/arena/public_control
+          cp -r experiments/v90/generated/selected experiments/v90/arena/selected
+          cp experiments/v90/opponents/*.py experiments/v90/arena/
+          python experiments/v90/field_eval_dirs.py \
+            --arena experiments/v90/arena --seeds 8 --start-seed 220001 --workers 4 \
+            --out experiments/v90/results/fresh_field.json
+      - name: Promotion contract and package
+        run: |
+          python experiments/v90/promote_v90.py \
+            --oracle experiments/v90/results/oracle_report.json \
+            --field experiments/v90/results/fresh_field.json \
+            --generated experiments/v90/generated \
+            --out experiments/v90/results/promotion.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: v90-shopforge-oracle
+          path: |
+            experiments/v90/results
+            experiments/v90/Kaggriculture_V90_1_ADAPTIVE_ROUTE_V2_PUBLIC_CONTROL.tar.gz
+            experiments/v90/Kaggriculture_V90_2_SHOPFORGE_RECALIBRATED.tar.gz
+          retention-days: 14

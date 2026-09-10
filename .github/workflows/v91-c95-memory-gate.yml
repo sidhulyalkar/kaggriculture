@@ -1,0 +1,68 @@
+name: V91 C95 memory gate
+
+on:
+  push:
+    branches: [research/v91-meta-options]
+    paths:
+      - 'experiments/v91/**'
+      - '.github/workflows/v91-c95-memory-gate.yml'
+  workflow_dispatch:
+
+jobs:
+  exact-gate:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 75
+    env:
+      PYTHONPATH: .
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install exact simulator
+        run: |
+          pip install -q --upgrade pybind11 numpy setuptools wheel
+          pip install -q 'kagsim @ git+https://github.com/destbreso/kaggriculture-cppsim@main'
+      - name: Build C95 memory candidates
+        run: |
+          rm -rf experiments/v91/generated
+          python experiments/v91/build_c95_memory_variants.py --out experiments/v91/generated
+          python -m py_compile experiments/v91/generated/*/main.py
+      - name: Build current opponent field
+        run: |
+          rm -rf experiments/v91/opponents
+          python experiments/v91/build_current_opponents.py
+          python -m py_compile experiments/v91/opponents/*.py
+          cat experiments/v91/opponents/manifest.json
+      - name: Discovery paired field
+        run: |
+          mkdir -p experiments/v91/results
+          python experiments/v91/eval_candidates.py \
+            --candidates experiments/v91/generated \
+            --opponents experiments/v91/opponents \
+            --seeds 10 --start-seed 410001 --clock-seeds 2 --workers 4 \
+            --out experiments/v91/results/discovery.json
+      - name: Independent holdout field
+        run: |
+          python experiments/v91/eval_candidates.py \
+            --candidates experiments/v91/generated \
+            --opponents experiments/v91/opponents \
+            --seeds 12 --start-seed 510001 --clock-seeds 2 --workers 4 \
+            --out experiments/v91/results/holdout.json
+      - name: Promotion contract and packages
+        run: |
+          rm -rf experiments/v91/packages
+          python experiments/v91/promote_v91.py \
+            --discovery experiments/v91/results/discovery.json \
+            --holdout experiments/v91/results/holdout.json \
+            --generated experiments/v91/generated \
+            --out experiments/v91/packages
+      - uses: actions/upload-artifact@v4
+        with:
+          name: v91-c95-memory-gate
+          path: |
+            experiments/v91/results
+            experiments/v91/generated/manifest.json
+            experiments/v91/opponents/manifest.json
+            experiments/v91/packages
+          retention-days: 14

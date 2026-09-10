@@ -1,0 +1,39 @@
+name: V91 meta option harvest
+
+on:
+  push:
+    branches: [research/v91-meta-options]
+    paths:
+      - 'experiments/v91/**'
+      - '.github/workflows/v91-meta-options.yml'
+  workflow_dispatch:
+
+jobs:
+  harvest:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Harvest current high-meta public strategy donors
+        run: |
+          python experiments/v91/harvest_meta_sources.py
+          python - <<'PY'
+          import json
+          p=json.load(open('experiments/v91/harvest/report.json'))
+          for k,v in p.items():
+              print('\n###',k,v.get('ref'))
+              print('error',v.get('error'))
+              print('output',v.get('output',{}).get('ok'),v.get('output',{}).get('error'))
+              for f in v.get('files',[]):
+                  path=f.get('path','')
+                  if path.endswith(('main.py','submission.py','.tar.gz','.so')) or 'decoded' in path:
+                      print(path, f.get('bytes'), f.get('sha256'), f.get('tar_members'))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: v91-meta-harvest
+          path: experiments/v91/harvest
+          retention-days: 14

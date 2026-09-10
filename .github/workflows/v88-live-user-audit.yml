@@ -1,0 +1,25 @@
+name: V88 Live user audit
+on:
+  push:
+    branches: ["research/v88-live-user-audit"]
+    paths:
+      - "experiments/v88/**"
+      - ".github/workflows/v88-live-user-audit.yml"
+  workflow_dispatch:
+
+jobs:
+  audit:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.11"}
+      - name: Audit current public submission
+        run: |
+          python experiments/v88/audit_user_live.py --replays 36
+          cat experiments/v88/results/summary.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: v88-live-user-audit
+          path: experiments/v88/results
+          retention-days: 14

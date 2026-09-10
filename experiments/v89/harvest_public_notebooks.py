@@ -11,7 +11,7 @@ import urllib.request
 
 SOURCES = {
     "shape": "tetsutani/shape-the-shop-work-the-pasture-kaggriculture",
-    "three_day": "yhay81/the-35-0-tape-a-causal-shop-router",
+    "three_day": "yhay81/three-day-shop-router",
     "adaptive_v2": "reyhanksatria/adaptive-route-agent-v2",
     "farming_v3": "tetsutani/farming-score-v3-replay-revised",
 }
@@ -74,7 +74,12 @@ def main():
     report={}
     for name,ref in SOURCES.items():
         d=root/name; d.mkdir(parents=True,exist_ok=True)
-        outer,nb=pull(ref)
+        try:
+            outer,nb=pull(ref)
+        except Exception as exc:
+            report[name]={"ref":ref,"error":repr(exc)}
+            print(name,ref,"ERROR",repr(exc))
+            continue
         (d/"notebook.ipynb").write_text(json.dumps(nb,indent=1))
         texts=[cell_text(c) for c in nb.get("cells",[])]
         (d/"all_code.txt").write_text("\n\n# ===== CELL =====\n\n".join(texts))

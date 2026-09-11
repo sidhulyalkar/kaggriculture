@@ -1,0 +1,106 @@
+name: V95 live-calibrated 2500 target gate
+
+on:
+  push:
+    branches: [research/v95-smartlab-late-router]
+    paths:
+      - 'experiments/v95/**'
+      - '.github/workflows/v95-live-calibrated-gate.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  exact-gate:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    env:
+      PYTHONPATH: .
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install exact simulator
+        run: |
+          pip install -q --upgrade pybind11 numpy setuptools wheel
+          pip install -q 'kagsim @ git+https://github.com/destbreso/kaggriculture-cppsim@main'
+          python - <<'PY'
+          import kagsim
+          assert getattr(kagsim, 'ENGINE_VERSION', '') == '1.32.7', kagsim.ENGINE_VERSION
+          print('engine', kagsim.ENGINE_VERSION)
+          PY
+
+      - name: Recover exact scored V85 control
+        run: |
+          rm -rf /tmp/v85 && mkdir -p /tmp/v85
+          gh api /repos/sidhulyalkar/kaggriculture/actions/artifacts/10127035370/zip > /tmp/v85.zip
+          unzip -q /tmp/v85.zip -d /tmp/v85
+          test -f /tmp/v85/submission/main.py
+          echo "$(sha256sum /tmp/v85/submission/main.py)"
+          test "$(sha256sum /tmp/v85/submission/main.py | awk '{print $1}')" = "02d15d4ebb69fb077a131529aab609b2b8bb992cc5582b82fc46fa3d3eb0dcad"
+
+      - name: Build pinned V95 candidates
+        run: |
+          rm -rf experiments/v95/generated experiments/v95/packages experiments/v95/results experiments/v95/opponents
+          python experiments/v95/build_v95_variants.py \
+            --out experiments/v95/generated \
+            --v85-main /tmp/v85/submission/main.py
+          python -m py_compile experiments/v95/generated/*/main.py
+
+      - name: Build independent current opponent field
+        run: |
+          rm -rf experiments/v91/opponents
+          python experiments/v91/build_current_opponents.py
+          mkdir -p experiments/v95/opponents
+          cp experiments/v91/opponents/adaptive_guard.py experiments/v95/opponents/adaptive_guard.py
+          cp experiments/v91/opponents/conditional_memory.py experiments/v95/opponents/conditional_memory.py
+          cp experiments/v91/opponents/harvestforge.py experiments/v95/opponents/harvestforge.py
+          cp experiments/v91/opponents/shape.py experiments/v95/opponents/shape.py
+          cp experiments/v95/generated/v85_exact/main.py experiments/v95/opponents/v85_exact.py
+          cp experiments/v95/generated/smart_t54/main.py experiments/v95/opponents/smart_t54.py
+          cp experiments/v95/generated/sparse_v43_exact/main.py experiments/v95/opponents/sparse_v43_exact.py
+          python -m py_compile experiments/v95/opponents/*.py
+
+      - name: Discovery field against exact live baseline
+        run: |
+          mkdir -p experiments/v95/results
+          python experiments/v91/eval_candidates.py \
+            --base v85_exact \
+            --candidates experiments/v95/generated \
+            --opponents experiments/v95/opponents \
+            --seeds 10 --start-seed 1010001 --clock-seeds 1 --workers 6 \
+            --out experiments/v95/results/discovery.json
+
+      - name: Independent holdout field
+        run: |
+          python experiments/v91/eval_candidates.py \
+            --base v85_exact \
+            --candidates experiments/v95/generated \
+            --opponents experiments/v95/opponents \
+            --seeds 12 --start-seed 1210001 --clock-seeds 1 --workers 6 \
+            --out experiments/v95/results/holdout.json
+
+      - name: Paired late-route selection and packages
+        run: |
+          python experiments/v95/select_v95.py \
+            --discovery experiments/v95/results/discovery.json \
+            --holdout experiments/v95/results/holdout.json \
+            --generated experiments/v95/generated \
+            --packages experiments/v95/packages \
+            --out experiments/v95/results/promotion.json
+          cat experiments/v95/results/promotion.json
+          ls -lh experiments/v95/packages
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: v95-live-calibrated-gate
+          path: |
+            experiments/v95/manifest.json
+            experiments/v95/results
+            experiments/v95/packages
+          retention-days: 14
